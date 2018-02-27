@@ -1,7 +1,6 @@
 //#include "common.h"
-#include <linux/slab.h>
-#include <asm/cacheflush.h>
-#include <linux/kallsyms.h>
+#include "util.h"
+
 #define HIJACK_SIZE 12
 
 
@@ -107,14 +106,6 @@ void hijack_start(void *target, void *new) {
     list_add(&sa->list, &hooked_syms);
 }
 
-struct my_hook {
-	char *name;
-	unsigned long address;
-	bool found;
-	bool hooked;
-	struct ftrace_ops *ops;
-};
-
 int kall_callback(void *data, const char *name, struct module *mod, unsigned long add) {
 	struct my_hook *temp = (struct my_hook *)data;
 	
@@ -130,11 +121,12 @@ int kall_callback(void *data, const char *name, struct module *mod, unsigned lon
 	return 0;
 }
 
-static int find_sym_address(struct my_hook *hook) {
+int find_sym_address(struct my_hook *hook) {
 	if (!kallsyms_on_each_symbol(kall_callback, (void *)hook)){
 		printk(KERN_INFO "%s symbol not found for some reason!", hook->name);
 		return 0;
 	}
 	return 1;
 }
+
 
