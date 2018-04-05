@@ -36,8 +36,10 @@ static int resume_writelock(void *cb_data) {
 
 	printk(KERN_INFO "resume_writelock called");
 
-	if ( !(modified_page = kmalloc(PAGE_SIZE, GFP_KERNEL)) )
+	if ( !(modified_page = kmalloc(PAGE_SIZE, GFP_KERNEL)) ) {
+		kfree(ctx);
 		return -1;
+	}
 
 	/* Lock the page to prevent modification */
 	if ( for_pte_pgd(ctx->pgd, ctx->vaddr, __hga_writelock) < 0 ) {
@@ -45,6 +47,7 @@ static int resume_writelock(void *cb_data) {
 		printk(KERN_ERR "WARNING: Re-locking failed after "
 			"writelock suspension...");
 		kfree(modified_page);
+		kfree(ctx);
 		return -1;
 	}
 
@@ -54,12 +57,13 @@ static int resume_writelock(void *cb_data) {
 		printk(KERN_ERR "WARNING: Page fetch failed after "
 			"writelock suspension...");
 		kfree(modified_page);
+		kfree(ctx);
 		return -1;
 	}
 
 	/* Send it off to the server */
 	ret_code = srvcom_commit_page(ctx->srvctx,
-		ctx->vaddr, ctx->procname, modified_page);
+		ctx->vaddr, ctx->pid, ctx->pgd, modified_page);
 
 	kfree(modified_page);
 	kfree(ctx);
@@ -68,15 +72,11 @@ static int resume_writelock(void *cb_data) {
 
 }
 
-static int suspend_writelock(unsigned long vaddr, pid_t pid, pgd_t *pgd,
-	char *pagedata, struct srvcom_ctx *srvctx, struct proc_cache_ctx *cachectx) {
+static int suspend_writelock(unsigned long vaddr, pid_t pid,
+	pgd_t *pgd, char *pagedata, struct srvcom_ctx *srvctx) {
 
-	pgd_t *pgd;
 	int writelocked;
 	struct handler_ctx *ctx;
-
-	if ( proc_cache_retrieve_by_name(cachectx, procname, NULL, &pgd, NULL) != 1 )
-		return -1;
 
 	if ( (writelocked = for_pte_pgd(pgd, vaddr, __hga_writelocked)) < 0 )
 		return -1;
@@ -90,10 +90,10 @@ static int suspend_writelock(unsigned long vaddr, pid_t pid, pgd_t *pgd,
 
 	if ( !(ctx = kmalloc(sizeof(struct handler_ctx), GFP_KERNEL)) )
 		return -1;
+	ctx->pid = pid;
 	ctx->pgd = pgd;
 	ctx->vaddr = vaddr;
 	ctx->srvctx = srvctx;
-	ctx->procname = procname;
 
 	if ( for_pte_pgd(pgd, vaddr, __hga_writeunlock) < 0 )
 		return -1;
@@ -108,7 +108,7 @@ static int suspend_writelock(unsigned long vaddr, pid_t pid, pgd_t *pgd,
 srvcom_ackcode_t handle_ev_allow_write(struct srvcom_ctx *srvctx,
 	unsigned long vaddr, pid_t pid, pgd_t *pgd, char *pagedata, void *cb_data) {
 
-	if ( suspend_writelock(vaddr, procname, pagedata, srvctx) < 0 )
+	if ( suspend_writelock(vaddr, pid, pgd, pagedata, srvctx) < 0 )
 		return ACKCODE_OP_FAILURE;
 
 	return ACKCODE_ALLOW_WRITE;

@@ -21,8 +21,7 @@ struct handler_ctx {
 
 
 // CONTINUE FILLING IN THIS FUNCTION...
-static int start_readlock(unsigned long vaddr, char *procname,
-	struct proc_cache_ctx *cachectx) {
+static int start_readlock(unsigned long vaddr, pid_t pid, pgd_t *pgd) {
 
 	pgd_t *pgd;
 	int readlocked;
@@ -51,12 +50,7 @@ static int start_readlock(unsigned long vaddr, char *procname,
 }
 
 srvcom_ackcode_t handle_ev_lock_read(struct srvcom_ctx *ctx,
-	unsigned long vaddr, char *procname, char *pagedata, void *cb_data) {
-
-	void **args = (void**)cb_data;
-
-	struct proc_cache_ctx *cachectx =
-		(struct proc_cache_ctx*)args[0];
+	unsigned long vaddr, pid_t pid, pgd_t *pgd, char *pagedata, void *cb_data) {
 
 	if ( start_readlock() < 0 )
 		return ACKCODE_OP_FAILURE;
