@@ -10,6 +10,10 @@
 
 
 
+MODULE_LICENSE("Dual BSD/GPL");
+
+
+
 #endif /* HGA_DEFS_H */
 
 

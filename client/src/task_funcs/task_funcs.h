@@ -21,6 +21,10 @@ int task_get_name(struct task_struct *task, char *name);
 
 
 
+MODULE_LICENSE("Dual BSD/GPL");
+
+
+
 #endif /* TASK_FUNCS_H */
 
 

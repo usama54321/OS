@@ -1,4 +1,11 @@
 
+
+
+#ifndef MAIN_C
+#define MAIN_C
+
+
+
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
@@ -10,6 +17,8 @@
 #include <linux/sched.h>
 #include <linux/moduleparam.h>
 #include "page_fault/page_fault.h"
+
+
 
 static int my_virt_drv_init(void){
     int retval;
@@ -27,7 +36,18 @@ static void my_virt_drv_exit(void){
     printk(KERN_INFO "my_virt_drv: Exit.\n");
 }
 
+
+
 module_init(my_virt_drv_init);
 module_exit(my_virt_drv_exit);
 
+
+
 MODULE_LICENSE("Dual BSD/GPL");
+
+
+
+#endif /* MAIN_C */
+
+
+

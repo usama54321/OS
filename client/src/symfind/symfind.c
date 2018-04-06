@@ -54,6 +54,10 @@ unsigned long find_sym_address(char *name) {
 
 
 
+MODULE_LICENSE("Dual BSD/GPL");
+
+
+
 #endif /* SYMFIND_C */
 
 

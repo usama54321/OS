@@ -1,6 +1,11 @@
 
 
 
+#ifndef PAGE_FAULT_C
+#define PAGE_FAULT_C
+
+
+
 #include <linux/highmem.h>
 #include <linux/bootmem.h>
 #include <linux/sched.h>
@@ -41,6 +46,7 @@
 #include "../pte_funcs/pte_funcs.h"
 #include "../task_funcs/task_funcs.h"
 #include "../ev_handlers/ev_handlers.h"
+#include "../readlock_list/readlock_list.h"
 
 // PGFAULT_NR is the interrupt number of page fault. It is platform specific.
 #if defined(CONFIG_X86_64)
@@ -104,6 +110,11 @@ typedef void (*do_page_fault_t)(struct pt_regs*, unsigned long);
  *      processes.
  */
 
+/*
+ * TODO:
+ *    - Implement pending readlocks
+ */
+
 
 
 #define SERVER_IP	"192.168.1.2"
@@ -113,14 +124,17 @@ typedef void (*do_page_fault_t)(struct pt_regs*, unsigned long);
 
 /* Globals */
 static struct srvcom_ctx *srvctx;
+static struct readlock_list *pending_readlocks;
 
 
 
 /* Initialization */
 static int __init_srvcom(void);
+static int __init_readlocks(void);
 static int my_fault_init(void);
 /* Deinitialization */
 static void __exit_srvcom(void);
+static void __exit_readlocks(void);
 static void my_fault_exit(void);
 
 
@@ -245,6 +259,8 @@ static int my_fault_init(void) {
 
 	if ( __init_srvcom() < 0 )
 		return -1;
+	if ( __init_readlocks() < 0 )
+		return -1;
 
 	return 0;
 
@@ -260,9 +276,22 @@ static int __init_srvcom(void) {
 	srvcom_set_serv_addr(srvctx, SERVER_IP, SERVER_PORT);
 
 	srvcom_register_handler(srvctx, OPCODE_ALLOW_WRITE, handle_ev_allow_write, NULL);
+	srvcom_register_handler(srvctx, OPCODE_LOCK_READ, handle_ev_lock_read, pending_readlocks);
+	srvcom_register_handler(srvctx, OPCODE_RESUME_READ, handle_ev_resume_read, pending_readlocks);
 
 	if ( srvcom_run(srvctx) < 0 ) {
 		printk(KERN_INFO "__init_srvcom: Failed to start srvcom");
+		return -1;
+	}
+
+	return 0;
+
+}
+
+static int __init_readlocks(void) {
+
+	if ( !(pending_readlocks = readlock_list_new()) ) {
+		printk(KERN_INFO "__init_readlocks: Failed allocation");
 		return -1;
 	}
 
@@ -275,6 +304,7 @@ static int __init_srvcom(void) {
 static void my_fault_exit(void) {
 
 	__exit_srvcom();
+	__exit_readlocks();
 
 	return;
 
@@ -283,6 +313,14 @@ static void my_fault_exit(void) {
 static void __exit_srvcom(void) {
 
 	srvcom_exit(srvctx);
+
+	return;
+
+}
+
+static void __exit_readlocks(void) {
+
+	readlock_list_free(pending_readlocks);
 
 	return;
 
@@ -405,6 +443,10 @@ void unregister_my_page_fault_handler(void){
 
 
 MODULE_LICENSE("Dual BSD/GPL");
+
+
+
+#endif /* PAGE_FAULT_C */
 
 
 
