@@ -1,120 +1,144 @@
 
 
 
+/*
+ *
+ * NOTE:
+ *
+ *    Allow handlers can fail if the page is not present.
+ *
+ *    This does not cause problems for the writelocking
+ *    part since failing some times is feasible for the
+ *    writelocker. The server will get a failure reply
+ *    and continue to look for other write requests.
+ *
+ *    Though this should not be done for reading. If the
+ *    readlocker handler (the function that locks reads
+ *    on the server's request) fails with probability p
+ *    then with 1/p machines, 1 is expected to fail for
+ *    every readlock multicast. We don't want to expect
+ *    one failure whenever a machine requests for write
+ *    permission. We must send a success reply whether
+ *    or not the PTE modification succeeded.
+ *
+ *    No problems with write control:
+ *        Writes disabled by default
+ *        Process triggers fault handler
+ *        Fault handler requests write
+ *        Allow handler grants write
+ *        Allow handler revokes write
+ *
+ *    Problems with read control without a pending readlock list:
+ *        Reads enabled by default
+ *        Revoke handler tries to block read (success):
+ *            - Process triggers fault handler
+ *            - Fault handler denies read
+ *            - Allow handler unblocks read (success):
+ *                o All goes good
+ *            - Allow handler unblocks read (failure):
+ *                o If we enlisted the readlock we can unlock the
+ *                  page at the next readlock-generated fault if
+ *                  the readlock was resolved (we have this flag).
+ *                o If we did not then the page is fucked forever.
+ *        Revoke handler tries to block read (failure):
+ *            - Process triggers fault handler due to
+ *              page not present
+ *                o If we enlisted the readlock, the fault handler
+ *                  can prevent making the page available if the
+ *                  readlock was not resolved and could make the
+ *                  page available otherwise.
+ *                o If we did not then the process can read wrong
+ *                  page data.
+ *            - Assume fault handler successfully denies
+ *              read
+ *            - Allow handler unblocks read (success):
+ *                o All goes good
+ *            - Allow handler unblocks read (failure):
+ *                o Using readlock lists we simply resolve the node
+ *                  blocking the faults.
+ *                o Without lists we couldn't even proceed after the
+ *                  first step.
+ *
+ *    Solution with pending readlock list:
+ *        - Reads allowed by default
+ *        - Server sends readlock command
+ *        - Peer tries to lock read (success or failure,
+ *          the process will trigger the fault handler
+ *          to access the page anyway)
+ *        - Peer adds readlock entry to pending list
+ *        - Process triggers the fault handler for that
+ *          page
+ *        - Page fault handler gets a read violation
+ *          and allows/disallows based on the pending
+ *          readlocks (and commits a readlock if it
+ *          was resolved)
+ *        - Page fault handler gets a "not present"
+ *          violation and resolves/does not resolve
+ *          based on the pending readlocks (again,
+ *          committing the readlock if resolved)
+ *        - Server sends a resume command
+ *        - Peer marks readlock resolved
+ *        - Process triggers fault handler
+ *        - Fault handler sees resolved page
+ *        - Fault handler commits resolved page
+ *        - Fault handler resumes read by either making
+ *          the page available or removing the readlock
+ *
+ *    SUBNOTE:
+ *        Committing a readlock is writing the new
+ *        page data and deleting the readlock from
+ *        the list...
+ *
+ * TL;DR we must keep a record of readlocked pages
+ * to ensure reliable and fault tolerant page reads
+ *
+ */
+
+
+
 #ifndef HANDLE_LOCK_READ_C
 #define HANDLE_LOCK_READ_C
 
 
 
+#include <linux/pfn_t.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/pgtable_types.h>
 
 #include "../srvcom/srvcom.h"
+#include "../pte_funcs/pte_funcs.h"
 #include "../ev_handlers/ev_handlers.h"
 #include "../readlock_list/readlock_list.h"
 
 
 
-struct cb_data_t {
-
-	pgd_t *pgd;
-	pfn_t pfn;
-
-};
-
-
-
-static int match_pending_page(struct readlock *readlock, void *data) {
-
-	struct cb_data_t *cb_data =
-		(struct cb_data_t*)data;
-
-	if ( readlock->resolved )
-		return 0;
-	if ( readlock->pgd != cb_data->pgd )
-		return 0;
-	if ( readlock->pfn != cb_data->pfn )
-		return 0;
-
-	return 1;
-
-}
-
-static int is_pending(struct readlock_list *list, pgd_t *pgd, pfn_t pfn) {
-
-	struct cb_data_t cb_data =
-		{.pgd = pgd, .pfn = pfn};
-	struct readlock *pending =
-		readlock_list_find(list, match_pending_page, &cb_data);
-
-	return pending ? 1 : 0;
-
-}
-
 static int start_readlock(unsigned long vaddr, pgd_t *pgd,
 	struct readlock_list *pending_readlocks) {
 
-	pfn_t pfn =
+	const pfn_t pfn =
 		{.val = vaddr>>PAGE_SHIFT};
-	int readlocked;
 
-	if ( (readlocked = for_pte_pgd(pgd, vaddr, __hga_readlocked)) < 0 ) {
-		/*
-		 * If the PTE fetch fails then there's a good chance
-		 * the reason of failure was a missing table in the
-		 * page traversal. If this is the case, and we leave
-		 * the page unlocked, a process can read the page at
-		 * some point in time before the writer process is
-		 * done writing. To prevent this we record the page
-		 * to be read-locked so that the page fault handler
-		 * ignores its read requests during this time.
-		 */
-		struct readlock *new_pending;
-		if ( is_pending(pending_readlocks, pgd, pfn) )
-			/* Do not duplicate readlocks! */
-			return 0;
-		if ( !(new_pending = readlock_new()) )
-			return -1;
-		new_pending->pgd = pgd;
-		new_pending->pfn = pfn;
-		readlock_list_insert(pending_readlocks, new_pending);
-		return 0;
-	}
+	printk(KERN_INFO "Attempting read-lock on page %p", (void*)vaddr);
 
-	if ( readlocked )
-		/* Already locked, possible duplicate */
-		return 0;
+	for_pte_pgd(pgd, vaddr, __hga_readlock);
 
-	printk(KERN_INFO "Read-locking page %p", (void*)vaddr);
-
-	if ( for_pte_pgd(pgd, vaddr, __hga_readlock) < 0 )
-		/* for_pte_pgd should have failed before though */
+	/*
+	 * If the PTE fetch fails then there's a good chance
+	 * the reason of failure was a missing table in the
+	 * page traversal. If this is the case, and we leave
+	 * the page unlocked, a process can read the page at
+	 * some point in time before the writer process is
+	 * done writing. To prevent this we record the page
+	 * to be read-locked so that the page fault handler
+	 * ignores its read requests during this time.
+	 */
+	if ( readlock_list_add_pending(pending_readlocks, pgd, pfn) < 0 )
 		return -1;
 
 	return 0;
 
 }
-
-/*
-
-Writing:
-	Writes disabled by default
-	Process triggers fault handler
-	Fault handler requests write
-	Allow handler grants write
-	Allow handler revokes write
-
-Reading:
-	Reads enabled by default
-	Revoke handler tries to block read (success):
-		- Process triggers fault handler
-		- Fault handler denies read
-		- Allow handler unblocks read
-		- Allow handler can fail too!
-	Revoke handler tries to block read (failure):
-		- // To be continued
-
-*/
 
 srvcom_ackcode_t handle_ev_lock_read(struct srvcom_ctx *ctx,
 	unsigned long vaddr, pid_t pid, pgd_t *pgd, char *pagedata,

@@ -2,7 +2,6 @@
 
 
 /*!
- *
  * @file readlock_list.c
  *
  * @brief Singly linked list data structure for readlock information.
@@ -26,7 +25,6 @@
  * step 7 if a readlock was not pending on the page. When B completes
  * the write operation, the entry for P will be resolved with the page
  * data and removed later by the read unlock handler.
- *
  */
 
 
@@ -36,35 +34,61 @@
 
 
 
+#define __HGA_KERNEL
+
+
+
+#ifdef __HGA_KERNEL
+
 #include <linux/pfn_t.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/semaphore.h>
 #include <linux/pgtable_types.h>
 
+#define ALLOC(n) kmalloc(n, GFP_KERNEL)
+#define FREE(ptr) kfree(ptr)
+#define PRINT(str, ...) printk(KERN_INFO str, __VA_ARGS__)
+#define WARN(str, ...) printk(KERN_ERR "WARNING: " str, __VA_ARGS__)
+#define ERROR(str, ...) printk(KERN_ERR "ERROR: " str, __VA_ARGS__)
+
+#else /* __HGA_KERNEL */
+
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+
+#define ALLOC(n) malloc(n)
+#define FREE(ptr) free(ptr)
+#define PRINT(str, ...) printf(str "\n", __VA_ARGS__)
+#define WARN(str, ...) printf("WARNING: " str "\n", __VA_ARGS__)
+#define ERROR(str, ...) printf(" ERROR: " str "\n", __VA_ARGS__)
+
+#endif /* __HGA_KERNEL */
+
+
+
 #include "../readlock_list/readlock_list.h"
 
 
 
-////////////////////////////////////////////////////////
-///////////////////// USER-DEFINED /////////////////////
-////////////////////////////////////////////////////////
+/////////////////////////////////////////////
+////////////////// HELPERS //////////////////
+/////////////////////////////////////////////
 
 /*!
-
-	@brief Allocate memory an readlock list node and initialize
-	with defaults.
-
-	@return Pointer to created readlock node, or NULL on failure.
-
-*/
-struct readlock *readlock_new(void) {
+ * @brief Allocate memory a readlock list node and initialize
+ * with defaults.
+ *
+ * @return Pointer to created readlock node, or NULL on failure.
+ */
+static struct readlock *__readlock_new(void) {
 
 	struct readlock *readlock =
-		(struct readlock*)kmalloc(sizeof(struct readlock), GFP_KERNEL);
+		(struct readlock*)ALLOC(sizeof(struct readlock));
 
 	if ( !readlock ) {
-		printk(KERN_INFO "readlock_new: Memory allocation failure.\n");
+		ERROR("__readlock_new: Memory allocation failure.");
 		return NULL;
 	}
 
@@ -75,133 +99,94 @@ struct readlock *readlock_new(void) {
 }
 
 /*!
+ * @brief Free memory allocated for a readlock_list node.
+ *
+ * Meant to be passed to __readlock_list_foreach as a callback
+ * function in readlock_list_free and readlock_list_empty.
+ *
+ * @see __readlock_list_foreach
+ * @see readlock_list_free
+ * @see readlock_list_empty
+ *
+ * Pointer members are assumed to point to allocated regions if
+ * not NULL, so avoid making modifications to these fields that
+ * can cause problems for deallocation.
+ *
+ * @param readlock Pointer to the readlock node in the list.
+ *
+ * @return 0 on success, or -1 on failure.
+ */
+static int __free_readlock(struct readlock *readlock) {
 
-	@brief Free memory allocated for an readlock_list node.
+	if ( readlock->resolved_page )
+		FREE(readlock->resolved_page);
 
-	Meant to be passed to readlock_list_foreach as a callback
-	function in readlock_list_free and readlock_list_empty.
-
-	@see readlock_list_foreach
-	@see readlock_list_free
-	@see readlock_list_empty
-
-	Pointer members are assumed to point to allocated regions if
-	not NULL, so avoid making modifications to these fields that
-	can cause problems for deallocation.
-
-	@param readlock Pointer to the readlock node in the list.
-
-	@return 0 on success, or -1 on failure.
-
-*/
-static int free_readlock(struct readlock *readlock) {
-
-	kfree(readlock);
+	FREE(readlock);
 
 	return 0;
 
 }
 
 /*!
+ * @brief Print a readlock node in the list.
+ *
+ * Meant to be passed to __readlock_list_foreach as a callback
+ * function in readlock_list_print.
+ *
+ * @see __readlock_list_foreach
+ * @see readlock_list_print
+ *
+ * @param readlock Pointer to the readlock node in the list.
+ *
+ * @return Just 0
+ */
+static int __print_readlock(struct readlock *readlock) {
 
-	@brief Print an readlock node in the list.
-
-	Meant to be passed to readlock_list_foreach as a callback
-	function in readlock_list_print.
-
-	@see readlock_list_foreach
-	@see readlock_list_print
-
-	@param readlock Pointer to the readlock node in the list.
-
-	@return Just 0
-
-*/
-static int print_readlock(struct readlock *readlock) {
-
-	printk(KERN_INFO "readlock data:\n");
+	PRINT("readlock data:");
 
 	// Print readlock members here
-	printk(KERN_INFO "    Resolved status: %d", readlock->resolved);
-	printk(KERN_INFO "    PGD location: %p", readlock->pgd);
-	printk(KERN_INFO "    Page frame number: %lu", readlock->pfn);
+	PRINT("    PGD location: %p", readlock->pgd);
+	PRINT("    Page frame number: %lu", readlock->pfn);
 
 	return 0;
 
 }
 
-
-
-///////////////////////////////////////////////////////
-////////////////////// AUTOMATIC //////////////////////
-///////////////////////////////////////////////////////
-
 /*!
+ * @brief Equate with a readlock node in the list.
+ *
+ * Meant to be passed to the iterator functions as a
+ * callback for finding nodes with a specific pgd/pfn
+ *
+ * @see __readlock_list_find
+ * @see __readlock_list_delete
+ *
+ * @param readlock Pointer to the readlock node in the list.
+ *
+ * @return Just 0
+ */
+static int __match_readlock(struct readlock *readlock, void *cb_data) {
 
-	@brief Allocate memory for an readlock_list and initialize
-	with defaults.
+	struct readlock *compare =
+		(struct readlock*)cb_data;
 
-	@return Pointer to the created list, or NULL on failure
+	if ( readlock->pgd != compare->pgd )
+		return 0;
+	if ( readlock->pfn != compare->pfn )
+		return 0;
 
-*/
-struct readlock_list *readlock_list_new(void) {
-
-	struct readlock_list *list =
-		(struct readlock_list*)kmalloc(sizeof(struct readlock_list), GFP_KERNEL);
-
-	if ( list == NULL ) {
-		printk(KERN_INFO "readlock_list_new: Allocation failure.\n");
-		return NULL;
-	}
-
-	list->n_readlocks = 0;
-
-	list->head = NULL;
-	list->tail = NULL;
-
-	return list;
+	return 1;
 
 }
 
 /*!
-
-	@brief Insert an readlock struct pointer at the head
-	of the list.
-
-	@param list Pointer to an readlock_list struct
-	@param readlock readlock struct pointer to insert
-
-*/
-void readlock_list_push_front(struct readlock_list *list, struct readlock *readlock) {
-
-	if (list->n_readlocks == 0) {
-
-		readlock->next = NULL;
-		list->head = list->tail = readlock;
-
-	} else {
-
-		readlock->next = list->head;
-		list->head = readlock;
-
-	}
-
-	list->n_readlocks += 1;
-
-	return;
-
-}
-
-/*!
-
-	@brief Insert an readlock struct pointer at the tail
-	of the list.
-
-	@param list Pointer to an readlock_list struct
-	@param readlock readlock struct pointer to insert
-
-*/
-void readlock_list_push_back(struct readlock_list *list, struct readlock *readlock) {
+ * @brief Insert a readlock struct pointer at the tail
+ * of the list.
+ *
+ * @param list Pointer to a readlock_list struct
+ * @param readlock readlock struct pointer to insert
+ */
+static void __readlock_list_push_back(struct readlock_list *list, struct readlock *readlock) {
 
 	if (list->n_readlocks == 0) {
 
@@ -223,135 +208,17 @@ void readlock_list_push_back(struct readlock_list *list, struct readlock *readlo
 }
 
 /*!
-
-	@brief Insert an readlock struct pointer at the head
-	of the list.
-
-	@param list Pointer to an readlock_list struct
-	@param readlock readlock struct pointer to insert
-
-*/
-void readlock_list_push(struct readlock_list *list, struct readlock *readlock) {
-
-	readlock_list_push_front(list, readlock);
-
-	return;
-
-}
-
-/*!
-
-	@brief Insert an readlock struct pointer at the tail
-	of the list.
-
-	@param list Pointer to an readlock_list struct
-	@param readlock readlock struct pointer to insert
-
-*/
-void readlock_list_insert(struct readlock_list *list, struct readlock *readlock) {
-
-	readlock_list_push_back(list, readlock);
-
-	return;
-
-}
-
-/*!
-
-	@brief Retrieve a pointer to the head of the list.
-
-	@param list Pointer to an readlock_list struct
-
-	@return Pointer to the head of the list
-
-*/
-struct readlock *readlock_list_front(struct readlock_list *list) {
-
-	return list->head;
-
-}
-
-/*!
-
-	@brief Retrieve a pointer to the tail of the list.
-
-	@param list Pointer to an readlock_list struct
-
-	@return Pointer to the tail of the list
-
-*/
-struct readlock *readlock_list_back(struct readlock_list *list) {
-
-	return list->tail;
-
-}
-
-/*!
-
-	@brief Retrieve a pointer to the head of the list.
-
-	@param list Pointer to an readlock_list struct
-
-	@return Pointer to the head of the list
-
-*/
-struct readlock *readlock_list_top(struct readlock_list *list) {
-
-	return list->head;
-
-}
-
-/*!
-
-	@brief Remove the head of the list.
-
-	@param list Pointer to an readlock_list struct
-
-	@return 0 on success, -1 if there was nothing to remove
-
-*/
-int readlock_list_pop_front(struct readlock_list *list) {
-
-	struct readlock *next;
-
-	if (list->n_readlocks == 0)
-		return -1;
-
-	if (list->n_readlocks == 1) {
-
-		free_readlock(list->head);
-		list->head = list->tail = NULL;
-		list->n_readlocks = 0;
-
-		return 0;
-
-	}
-
-	next = list->head->next;
-	free_readlock(list->head);
-	list->head = next;
-	list->n_readlocks -= 1;
-
-	return 0;
-
-}
-
-/*!
-
-	@brief Remove the head of the list.
-
-	@param list Pointer to an readlock_list struct
-
-	@return 0 on success, -1 if there was nothing to remove
-
-*/
-int readlock_list_pop(struct readlock_list *list) {
-
-	return readlock_list_pop_front(list);
-
-}
-
-/*! Selects the callback to call and calls it */
+ * @brief Selects the callback to call and calls it
+ *
+ * readlock_cb is taken as a void pointer to a function and
+ * the actual function type is decided at runtime as either a
+ * function taking a readlock struct pointer or a function
+ * taking both a readlock struct pointer and callback data.
+ * If cb_data is NULL then readlock_cb is assumed to be of
+ * the former type, otherwise it is assumed to be of the latter
+ * type and cb_data will be passed to the function as a second
+ * argument.
+ */
 #define CALL_CB (						\
 	cb_data ?						\
 	((readlock_callback)readlock_cb)(curr, cb_data):	\
@@ -359,38 +226,27 @@ int readlock_list_pop(struct readlock_list *list) {
 )
 
 /*!
-
-	@brief Invoke a callback function on all readlock pointers
-	in the list.
-
-	The callback function must take a pointer to a readlock
-	struct, optionally a pointer to callback data, and return an
-	integer result. The return value of this function will be the
-	sum of results returned by each invocation of the callback
-	function. This is intended to be useful where the callback
-	would be an indicator function, and we want the number of
-	successes after iterating over all list nodes.
-
-	readlock_cb is taken as a void pointer to a function and
-	the actual function type is decided at runtime as either a
-	function taking an readlock struct pointer or a function
-	taking both an readlock struct pointer and callback data.
-	If cb_data is NULL then readlock_cb is assumed to be of
-	the former type, otherwise it is assumed to be of the latter
-	type and cb_data will be passed to the function as a second
-	argument.
-
-	@param list Pointer to an readlock_list struct
-	@param readlock_cb Function pointer to callback function
-	@param cb_data Pointer to callback data
-
-	@see readlock_callback
-	@see readlock_callback_nocbdata
-
-	@return Integer sum of invocation results
-
-*/
-int readlock_list_foreach(struct readlock_list *list,
+ * @brief Invoke a callback function on all readlock pointers
+ * in the list.
+ *
+ * The callback function must take a pointer to a readlock
+ * struct, optionally a pointer to callback data, and return an
+ * integer result. The return value of this function will be the
+ * sum of results returned by each invocation of the callback
+ * function. This is intended to be useful where the callback
+ * would be an indicator function, and we want the number of
+ * successes after iterating over all list nodes.
+ *
+ * @param list Pointer to a readlock_list struct
+ * @param readlock_cb Function pointer to callback function
+ * @param cb_data Pointer to callback data
+ *
+ * @see readlock_callback
+ * @see readlock_callback_nocbdata
+ *
+ * @return Integer sum of invocation results
+ */
+static int __readlock_list_foreach(struct readlock_list *list,
 	void *readlock_cb, void *cb_data) {
 
 	int sum = 0;
@@ -407,8 +263,22 @@ int readlock_list_foreach(struct readlock_list *list,
 
 }
 
-/* Undocumented */
-struct readlock *readlock_list_find(struct readlock_list *list,
+/*!
+ * @brief Invoke a callback function on all readlock pointers
+ * in the list and return the first one which gives a non-zero
+ * return value.
+ *
+ * @param list Pointer to a readlock_list struct
+ * @param readlock_cb Function pointer to callback function
+ * @param cb_data Pointer to callback data
+ *
+ * @see readlock_callback
+ * @see readlock_callback_nocbdata
+ *
+ * @return First readlock node pointer on which the callback
+ * returns a non-zero result.
+ */
+static struct readlock *__readlock_list_find(struct readlock_list *list,
 	void *readlock_cb, void *cb_data) {
 
 	struct readlock *curr = list->head, *next;
@@ -424,7 +294,20 @@ struct readlock *readlock_list_find(struct readlock_list *list,
 
 }
 
-/* Undocumented */
+/*!
+ * @brief Invoke a callback function on all readlock pointers
+ * in the list and delete the first one which gives a non-zero
+ * return value.
+ *
+ * @param list Pointer to a readlock_list struct
+ * @param readlock_cb Function pointer to callback function
+ * @param cb_data Pointer to callback data
+ *
+ * @see readlock_callback
+ * @see readlock_callback_nocbdata
+ *
+ * @return 1 if a node was deleted, 0 otherwise
+ */
 static int __readlock_list_delete(struct readlock_list *list,
 	void *readlock_cb, void *cb_data) {
 
@@ -453,7 +336,7 @@ static int __readlock_list_delete(struct readlock_list *list,
 	if ( !next )
 		list->tail = prev;
 
-	free_readlock(curr);
+	__free_readlock(curr);
 
 	list->n_readlocks -= 1;
 
@@ -463,79 +346,226 @@ static int __readlock_list_delete(struct readlock_list *list,
 
 #undef CALL_CB
 
-/* Undocumented */
-void readlock_list_delete(struct readlock_list *list,
-	void *readlock_cb, void *cb_data) {
-
-	__readlock_list_delete(list, readlock_cb, cb_data);
-
-	return;
-
-}
-
-/* Undocumented */
-void readlock_list_delete_all(struct readlock_list *list,
-	void *readlock_cb, void *cb_data) {
-
-	while (__readlock_list_delete(list, readlock_cb, cb_data));
-
-	return;
-
-}
+////////////////////////////////////////////////
+////////////////// INTERFACES //////////////////
+////////////////////////////////////////////////
 
 /*!
+ * @brief Allocate memory for a readlock_list and initialize
+ * with defaults.
+ *
+ * @return Pointer to the created list, or NULL on failure
+ */
+struct readlock_list *readlock_list_new(void) {
 
-	@brief Destroy all nodes and empty the list.
+	struct readlock_list *list =
+		(struct readlock_list*)ALLOC(sizeof(struct readlock_list));
 
-	@param list Pointer to an readlock_list struct
-
-*/
-void readlock_list_empty(struct readlock_list *list) {
-
-	readlock_list_foreach(list, free_readlock, NULL);
+	if ( list == NULL ) {
+		ERROR("readlock_list_new: Allocation failure.");
+		return NULL;
+	}
 
 	list->n_readlocks = 0;
 
 	list->head = NULL;
 	list->tail = NULL;
 
-	return;
+	spin_lock_init(&list->lock);
+	spin_unlock(&list->lock);
+
+	return list;
 
 }
 
 /*!
-
-	@brief Destroy all nodes along with the list.
-
-	@param list Pointer to an readlock_list struct
-
-*/
+ * @brief Destroy all nodes along with the list.
+ *
+ * @param list Pointer to a readlock_list struct
+ */
 void readlock_list_free(struct readlock_list *list) {
 
-	readlock_list_foreach(list, free_readlock, NULL);
+	spin_lock(&list->lock);
 
-	kfree(list);
+	__readlock_list_foreach(list, __free_readlock, NULL);
+
+	FREE(list);
+
+	spin_unlock(&list->lock);
 
 	return;
 
 }
 
 /*!
-
-	@brief Print all nodes in the list.
-
-	Printing will be done as specified in print_readlock.
-
-	@see print_readlock
-
-	@param list Pointer to an readlock_list struct
-
-*/
+ * @brief Print all nodes in the list.
+ *
+ * Printing will be done as specified in __print_readlock.
+ *
+ * @see __print_readlock
+ *
+ * @param list Pointer to a readlock_list struct
+ */
 void readlock_list_print(struct readlock_list *list) {
 
-	readlock_list_foreach(list, print_readlock, NULL);
+	spin_lock(&list->lock);
+
+	__readlock_list_foreach(list, __print_readlock, NULL);
+
+	spin_unlock(&list->lock);
 
 	return;
+
+}
+
+/*!
+ * @brief Add a readlock to a readlock list with replacement
+ *
+ * If a readlock with the provided pgd/pfn is found, it is
+ * simply marked unresolved, otherwise a new unresolved node
+ * is added to the list (at the tail).
+ *
+ * @param list Pointer to a readlock_list struct
+ * @param pgd Pointer to the PGD
+ * @param pfn Page frame number
+ *
+ * @return 0 if the readlock was added or replaced, or -1 on
+ * failure
+ */
+int readlock_list_add_pending(struct readlock_list *list, pgd_t *pgd,
+	pfn_t pfn) {
+
+	struct readlock *readlock;
+
+	spin_lock(&list->lock);
+
+	/* Find a readlock containing pgd and pfn */
+	readlock = __readlock_list_find(list, __match_readlock,
+		&(struct readlock){.pgd = pgd, .pfn = pfn});
+
+	if ( readlock ) {
+		/* The readlock is present; reset it */
+		if ( readlock->resolved_page ) {
+			FREE(readlock->resolved_page);
+			readlock->resolved_page = NULL;
+		}
+		spin_unlock(&list->lock);
+		return 0;
+	}
+
+	/* Not present; add a new readlock */
+	if ( !(readlock = __readlock_new()) ) {
+		spin_unlock(&list->lock);
+		return -1;
+	}
+	readlock->pgd = pgd;
+	readlock->pfn = pfn;
+	__readlock_list_push_back(list, readlock);
+
+	spin_unlock(&list->lock);
+
+	return 0;
+
+}
+
+/*!
+ * @brief Mark a readlock resolved with page data
+ *
+ * The resolved_page pointer member is used to
+ * indicate whether or not the page is resolved,
+ * so we just allocate page data for this field
+ * and copy all the page content.
+ *
+ * @param list Pointer to a readlock_list struct
+ * @param pgd Pointer to the PGD
+ * @param pfn Page frame number
+ * @param page Pointer to page data
+ *
+ * @return 0 on success, or -1 on failure or if no
+ * readlock matched the given pgd and pfn
+ */
+int readlock_list_resolve(struct readlock_list *list, pgd_t *pgd,
+	pfn_t pfn, char *page) {
+
+	struct readlock *readlock;
+
+	spin_lock(&list->lock);
+
+	/* Find a readlock containing pgd and pfn */
+	readlock = __readlock_list_find(list, __match_readlock,
+		&(struct readlock){.pgd = pgd, .pfn = pfn});
+
+	if ( !readlock ) {
+		/* Shouldn't happen */
+		WARN("Unable to resolve missing readlock");
+		spin_unlock(&list->lock);
+		return -1;
+	}
+
+	if ( !(readlock->resolved_page = ALLOC(PAGE_SIZE)) ) {
+		spin_unlock(&list->lock);
+		return -1;
+	}
+	memcpy(readlock->resolved_page, page, PAGE_SIZE);
+
+	spin_unlock(&list->lock);
+
+	return 0;
+
+}
+
+/*!
+ * @brief Find a readlock node with a specific pgd and pfn
+ *
+ * @param list Pointer to a readlock_list struct
+ * @param pgd Pointer to the PGD
+ * @param pfn Page frame number
+ *
+ * @return Pointer to the first readlock node matching the
+ * given pgd and pfn, or NULL on no match
+ */
+struct readlock *readlock_list_find(struct readlock_list *list, pgd_t *pgd,
+	pfn_t pfn) {
+
+	struct readlock *ret;
+
+	spin_lock(&list->lock);
+
+	ret = __readlock_list_find(list, __match_readlock,
+		&(struct readlock){.pgd = pgd, .pfn = pfn});
+
+	spin_unlock(&list->lock);
+
+	return ret;
+
+}
+
+/*!
+ * @brief Remove a readlock from the list
+ *
+ * Removes only the first readlock node matching
+ * the given pgd and pfn.
+ *
+ * @param list Pointer to a readlock_list struct
+ * @param pgd Pointer to the PGD
+ * @param pfn Page frame number
+ *
+ * @return 0 on success, or -1 on failure or if no
+ * readlock matched the given pgd and pfn
+ */
+int readlock_list_remove(struct readlock_list *list, pgd_t *pgd,
+	pfn_t pfn) {
+
+	int ret;
+
+	spin_lock(&list->lock);
+
+	ret = __readlock_list_delete(list, __match_readlock,
+		&(struct readlock){.pgd = pgd, .pfn = pfn});
+
+	spin_unlock(&list->lock);
+
+	return ret;
 
 }
 

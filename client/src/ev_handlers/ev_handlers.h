@@ -27,10 +27,10 @@
 
 
 
-/* TODO: Complete all required handler functions */
 DECLARE_HANDLER(handle_ev_allow_write);
 DECLARE_HANDLER(handle_ev_lock_read);
 DECLARE_HANDLER(handle_ev_resume_read);
+DECLARE_HANDLER(handle_ev_ping_alive);
 
 
 

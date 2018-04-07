@@ -6,6 +6,10 @@
 	DESCRIPTION:
 		Kernel module to monitor page activity
 
+	TODO:
+		The implementation with dirty bits does
+		not work. Remove it.
+
 */
 
 #ifndef PAGE_MONITOR_C
