@@ -204,11 +204,6 @@ typedef void (*do_page_fault_t)(struct pt_regs*, unsigned long);
  *      processes.
  */
 
-/*
- * TODO:
- *    - Implement pending readlocks
- */
-
 
 
 #define SERVER_IP	"192.168.1.2"
