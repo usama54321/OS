@@ -28,10 +28,11 @@ typedef int (*pte_handler_t)(pte_t*);
 int __hga_mark(pte_t *pte_entry);
 int __hga_writelock(pte_t *pte_entry);
 int __hga_writeunlock(pte_t *pte_entry);
-int __hga_reset(pte_t *pte_entry);
+int __hga_readlock(pte_t *pte_entry);
+int __hga_readunlock(pte_t *pte_entry);
 int __hga_marked(pte_t *pte_entry);
 int __hga_writelocked(pte_t *pte_entry);
-int __hga_written(pte_t *pte_entry);
+int __hga_readlocked(pte_t *pte_entry);
 int __hga_shareable(pte_t *pte_entry);
 int __hga_printflags(pte_t *pte_entry);
 

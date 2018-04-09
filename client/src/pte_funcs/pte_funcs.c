@@ -57,17 +57,23 @@
 			pte_set_flags(*(pte_entry), _PAGE_RW);		\
 	)								\
 }
-#define __HGA_RESET(pte_entry) { /* Forget this page was modified */	\
+#define __HGA_READLOCK(pte_entry) { /* Only read with permission */	\
 	PT_EDIT_MODE(							\
 		*(pte_entry) =						\
-			pte_clear_flags(*(pte_entry), _PAGE_DIRTY);	\
+			pte_clear_flags(*(pte_entry), _PAGE_USER);	\
+	)								\
+}
+#define __HGA_READUNLOCK(pte_entry) { /* Free to read */		\
+	PT_EDIT_MODE(							\
+		*(pte_entry) =						\
+			pte_set_flags(*(pte_entry), _PAGE_USER);	\
 	)								\
 }
 
 /* Testers */
 #define __HGA_MARKED(pte_entry) (pte_flags(*(pte_entry)) & _PAGE_PCD)
 #define __HGA_WRITEUNLOCKED(pte_entry) (pte_flags(*(pte_entry)) & _PAGE_RW)
-#define __HGA_WRITTEN(pte_entry) (pte_flags(*(pte_entry)) & _PAGE_DIRTY)
+#define __HGA_READUNLOCKED(pte_entry) (pte_flags(*(pte_entry)) & _PAGE_USER)
 #define __HGA_SHAREABLE(pte_entry) (pte_flags(*(pte_entry)) & _PAGE_NX)
 
 
@@ -76,10 +82,11 @@
 int __hga_mark(pte_t *pte_entry) {__HGA_MARK(pte_entry); return 0;}
 int __hga_writelock(pte_t *pte_entry) {__HGA_WRITELOCK(pte_entry); return 0;}
 int __hga_writeunlock(pte_t *pte_entry) {__HGA_WRITEUNLOCK(pte_entry); return 0;}
-int __hga_reset(pte_t *pte_entry) {__HGA_RESET(pte_entry); return 0;}
+int __hga_readlock(pte_t *pte_entry) {__HGA_READLOCK(pte_entry); return 0;}
+int __hga_readunlock(pte_t *pte_entry) {__HGA_READUNLOCK(pte_entry); return 0;}
 int __hga_marked(pte_t *pte_entry) {return __HGA_MARKED(pte_entry)?1:0;}
 int __hga_writelocked(pte_t *pte_entry) {return __HGA_WRITEUNLOCKED(pte_entry)?0:1;}
-int __hga_written(pte_t *pte_entry) {return __HGA_WRITTEN(pte_entry)?1:0;}
+int __hga_readlocked(pte_t *pte_entry) {return __HGA_READUNLOCKED(pte_entry)?0:1;}
 int __hga_shareable(pte_t *pte_entry) {return __HGA_SHAREABLE(pte_entry)?1:0;}
 int __hga_printflags(pte_t *pte_entry) {
 
