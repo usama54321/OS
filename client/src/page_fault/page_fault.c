@@ -376,6 +376,8 @@ static inline void __handle_usermode_read_violation(pgd_t *pgd,
 	if ( set_page_data(pgd, pf_vaddr, readlocked->resolved_page) < 0 )
 		/* Shouldn't happen */
 		for_pte_pgd(pgd, pf_vaddr, __hga_readlock);
+	else
+		readlock_list_remove(pending_readlocks, pgd, pfn);
 
 	return;
 
@@ -408,6 +410,8 @@ static inline void __handle_usermode_read_missingpage(pgd_t *pgd,
 	if ( set_page_data(pgd, pf_vaddr, readlocked->resolved_page) < 0 )
 		/* Shouldn't happen */
 		for_pte_pgd(pgd, pf_vaddr, __hga_readlock);
+	else
+		readlock_list_remove(pending_readlocks, pgd, pfn);
 
 	return;
 
