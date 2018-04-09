@@ -46,7 +46,7 @@ int ksock_create(struct socket **sock) {
 int ksock_connect(struct socket *sock, struct sockaddr_in *serv_addr) {
 
 	int error_code;
-	socklen_t addrlen = sizeof(struct sockaddr_in);
+	size_t addrlen = sizeof(struct sockaddr_in);
 
 	error_code = sock->ops->connect(sock,
 		(struct sockaddr*)serv_addr, addrlen, O_RDWR);

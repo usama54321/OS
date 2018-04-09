@@ -45,7 +45,7 @@ MODULE_LICENSE("Dual BSD/GPL");
 
 
 
-#undef PTE_FUNCS_H
+#endif /* PTE_FUNCS_H */
 
 
 

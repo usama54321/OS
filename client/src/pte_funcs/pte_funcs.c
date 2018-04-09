@@ -206,7 +206,7 @@ MODULE_LICENSE("Dual BSD/GPL");
 
 
 
-#undef /* PTE_FUNCS_C */
+#endif /* PTE_FUNCS_C */
 
 
 

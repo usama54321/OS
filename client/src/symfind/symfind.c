@@ -6,6 +6,11 @@
 
 
 
+#include <linux/kernel.h>
+#include <linux/module.h>
+
+
+
 #include "symfind.h"
 
 

@@ -240,7 +240,8 @@ static void __handle_usermode_read(pgd_t *pgd, unsigned long pf_vaddr,
 
 
 
-#define FOR_PTE(func) (for_pte_pgd(pgd, pf_vaddr, __hga_##func))
+#define FOR_PTE(func) \
+	(for_pte_pgd(pgd, pf_vaddr, __hga_##func))
 
 #define ACCESS_VIOLATE	(1 << 0)
 #define WRITE_ATTEMPT	(1 << 1)
@@ -249,19 +250,19 @@ static void __handle_usermode_read(pgd_t *pgd, unsigned long pf_vaddr,
 	(ACCESS_VIOLATE|WRITE_ATTEMPT|USERMODE)
 
 #define IS_USERMODE_WRITE_VIOLATION(x) \
-	((x)&ERRCODE_MASK == (ACCESS_VIOLATE|WRITE_ATTEMPT|USERMODE))
+	(((x)&ERRCODE_MASK) == (ACCESS_VIOLATE|WRITE_ATTEMPT|USERMODE))
 #define IS_USERMODE_READ(x) \
-	((x)&(WRITE_ATTEMPT|USERMODE) == USERMODE)
+	(((x)&(WRITE_ATTEMPT|USERMODE)) == USERMODE)
 
 void my_do_page_fault(struct pt_regs* regs, unsigned long error_code) {
 
 	int marked, shareable;
-	const struct task_struct *task = current;
-	const unsigned long pf_vaddr = read_cr2();
-	const do_page_fault_t pfault =
+	struct task_struct *task = current;
+	unsigned long pf_vaddr = read_cr2();
+	do_page_fault_t pfault =
 		(do_page_fault_t)addr_dft_do_page_fault;
-	const pid_t pid = task->pid;
-	const pgd_t *pgd = task->mm->pgd;
+	pid_t pid = task->pid;
+	pgd_t *pgd = task->mm->pgd;
 
 	if ( task_targeted(task) != 1 ) {
 		/* Error or not a target process */
@@ -352,10 +353,8 @@ static void __handle_usermode_read(pgd_t *pgd, unsigned long pf_vaddr,
 static inline void __handle_usermode_read_violation(pgd_t *pgd,
 	unsigned long pf_vaddr, struct pt_regs* regs, unsigned long error_code) {
 
-	const do_page_fault_t pfault =
-		(do_page_fault_t)addr_dft_do_page_fault;
-	const pfn_t pfn = {.val = pf_vaddr>>PAGE_SHIFT};
-	const struct readlock *readlocked =
+	pfn_t pfn = {.val = pf_vaddr>>PAGE_SHIFT};
+	struct readlock *readlocked =
 		readlock_list_find(pending_readlocks, pgd, pfn);
 
 	/*
@@ -385,10 +384,10 @@ static inline void __handle_usermode_read_violation(pgd_t *pgd,
 static inline void __handle_usermode_read_missingpage(pgd_t *pgd,
 	unsigned long pf_vaddr, struct pt_regs* regs, unsigned long error_code) {
 
-	const do_page_fault_t pfault =
+	do_page_fault_t pfault =
 		(do_page_fault_t)addr_dft_do_page_fault;
-	const pfn_t pfn = {.val = pf_vaddr>>PAGE_SHIFT};
-	const struct readlock *readlocked =
+	pfn_t pfn = {.val = pf_vaddr>>PAGE_SHIFT};
+	struct readlock *readlocked =
 		readlock_list_find(pending_readlocks, pgd, pfn);
 
 	/*

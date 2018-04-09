@@ -18,7 +18,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/semaphore.h>
-#include <linux/pgtable_types.h>
+#include <asm/pgtable_types.h>
 
 
 
@@ -82,7 +82,7 @@ typedef int (*readlock_callback_nocbdata)(struct readlock*);
 struct readlock_list *readlock_list_new(void);
 int readlock_list_add_pending(struct readlock_list *list, pgd_t *pgd, pfn_t pfn);
 int readlock_list_resolve(struct readlock_list *list, pgd_t *pgd, pfn_t pfn, char *page);
-struct readlock_list *readlock_list_find(struct readlock_list *list, pgd_t *pgd, pfn_t pfn);
+struct readlock *readlock_list_find(struct readlock_list *list, pgd_t *pgd, pfn_t pfn);
 int readlock_list_remove(struct readlock_list *list, pgd_t *pgd, pfn_t pfn);
 void readlock_list_print(struct readlock_list *list);
 void readlock_list_free(struct readlock_list *list);

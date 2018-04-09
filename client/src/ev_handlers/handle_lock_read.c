@@ -104,7 +104,7 @@
 #include <linux/pfn_t.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/pgtable_types.h>
+#include <asm/pgtable_types.h>
 
 #include "../srvcom/srvcom.h"
 #include "../pte_funcs/pte_funcs.h"

@@ -40,17 +40,18 @@
 
 #ifdef __HGA_KERNEL
 
+#include <linux/slab.h>
 #include <linux/pfn_t.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/semaphore.h>
-#include <linux/pgtable_types.h>
+#include <asm/pgtable_types.h>
 
-#define ALLOC(n) kmalloc(n, GFP_KERNEL)
-#define FREE(ptr) kfree(ptr)
-#define PRINT(str, ...) printk(KERN_INFO str, __VA_ARGS__)
-#define WARN(str, ...) printk(KERN_ERR "WARNING: " str, __VA_ARGS__)
-#define ERROR(str, ...) printk(KERN_ERR "ERROR: " str, __VA_ARGS__)
+#define __RL_ALLOC(n) kmalloc(n, GFP_KERNEL)
+#define __RL_FREE(ptr) kfree(ptr)
+#define __RL_PRINT(str, ...) printk(KERN_INFO str, ##__VA_ARGS__)
+#define __RL_WARN(str, ...) printk(KERN_ERR "WARNING: " str, ##__VA_ARGS__)
+#define __RL_ERROR(str, ...) printk(KERN_ERR "ERROR: " str, ##__VA_ARGS__)
 
 #else /* __HGA_KERNEL */
 
@@ -58,11 +59,11 @@
 #include <string.h>
 #include <stdlib.h>
 
-#define ALLOC(n) malloc(n)
-#define FREE(ptr) free(ptr)
-#define PRINT(str, ...) printf(str "\n", __VA_ARGS__)
-#define WARN(str, ...) printf("WARNING: " str "\n", __VA_ARGS__)
-#define ERROR(str, ...) printf(" ERROR: " str "\n", __VA_ARGS__)
+#define __RL_ALLOC(n) malloc(n)
+#define __RL_FREE(ptr) free(ptr)
+#define __RL_PRINT(str, ...) printf(str "\n", ##__VA_ARGS__)
+#define __RL_WARN(str, ...) printf("WARNING: " str "\n", ##__VA_ARGS__)
+#define __RL_ERROR(str, ...) printf("ERROR: " str "\n", ##__VA_ARGS__)
 
 #endif /* __HGA_KERNEL */
 
@@ -85,10 +86,10 @@
 static struct readlock *__readlock_new(void) {
 
 	struct readlock *readlock =
-		(struct readlock*)ALLOC(sizeof(struct readlock));
+		(struct readlock*)__RL_ALLOC(sizeof(struct readlock));
 
 	if ( !readlock ) {
-		ERROR("__readlock_new: Memory allocation failure.");
+		__RL_ERROR("__readlock_new: Memory allocation failure.");
 		return NULL;
 	}
 
@@ -119,9 +120,9 @@ static struct readlock *__readlock_new(void) {
 static int __free_readlock(struct readlock *readlock) {
 
 	if ( readlock->resolved_page )
-		FREE(readlock->resolved_page);
+		__RL_FREE(readlock->resolved_page);
 
-	FREE(readlock);
+	__RL_FREE(readlock);
 
 	return 0;
 
@@ -142,11 +143,11 @@ static int __free_readlock(struct readlock *readlock) {
  */
 static int __print_readlock(struct readlock *readlock) {
 
-	PRINT("readlock data:");
+	__RL_PRINT("readlock data:");
 
 	// Print readlock members here
-	PRINT("    PGD location: %p", readlock->pgd);
-	PRINT("    Page frame number: %lu", readlock->pfn);
+	__RL_PRINT("    PGD location: %p", readlock->pgd);
+	__RL_PRINT("    Page frame number: %llu", readlock->pfn.val);
 
 	return 0;
 
@@ -172,7 +173,7 @@ static int __match_readlock(struct readlock *readlock, void *cb_data) {
 
 	if ( readlock->pgd != compare->pgd )
 		return 0;
-	if ( readlock->pfn != compare->pfn )
+	if ( readlock->pfn.val != compare->pfn.val )
 		return 0;
 
 	return 1;
@@ -359,10 +360,10 @@ static int __readlock_list_delete(struct readlock_list *list,
 struct readlock_list *readlock_list_new(void) {
 
 	struct readlock_list *list =
-		(struct readlock_list*)ALLOC(sizeof(struct readlock_list));
+		(struct readlock_list*)__RL_ALLOC(sizeof(struct readlock_list));
 
 	if ( list == NULL ) {
-		ERROR("readlock_list_new: Allocation failure.");
+		__RL_ERROR("readlock_list_new: Allocation failure.");
 		return NULL;
 	}
 
@@ -389,7 +390,7 @@ void readlock_list_free(struct readlock_list *list) {
 
 	__readlock_list_foreach(list, __free_readlock, NULL);
 
-	FREE(list);
+	__RL_FREE(list);
 
 	spin_unlock(&list->lock);
 
@@ -446,7 +447,7 @@ int readlock_list_add_pending(struct readlock_list *list, pgd_t *pgd,
 	if ( readlock ) {
 		/* The readlock is present; reset it */
 		if ( readlock->resolved_page ) {
-			FREE(readlock->resolved_page);
+			__RL_FREE(readlock->resolved_page);
 			readlock->resolved_page = NULL;
 		}
 		spin_unlock(&list->lock);
@@ -497,12 +498,12 @@ int readlock_list_resolve(struct readlock_list *list, pgd_t *pgd,
 
 	if ( !readlock ) {
 		/* Shouldn't happen */
-		WARN("Unable to resolve missing readlock");
+		__RL_WARN("Unable to resolve missing readlock");
 		spin_unlock(&list->lock);
 		return -1;
 	}
 
-	if ( !(readlock->resolved_page = ALLOC(PAGE_SIZE)) ) {
+	if ( !(readlock->resolved_page = __RL_ALLOC(PAGE_SIZE)) ) {
 		spin_unlock(&list->lock);
 		return -1;
 	}

@@ -23,7 +23,7 @@ static int alive_status(void) {
 }
 
 srvcom_ackcode_t handle_ev_ping_alive(struct srvcom_ctx *ctx,
-	unsigned long vaddr, char *procname, char *pagedata, void *cb_data) {
+	unsigned long vaddr, pid_t pid, pgd_t *pgd, char *pagedata, void *cb_data) {
 
 	if ( alive_status() < 0 )
 		return ACKCODE_OP_FAILURE;
