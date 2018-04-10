@@ -6,6 +6,11 @@
 
 
 
+#include <linux/kernel.h>
+#include <linux/module.h>
+
+
+
 #include "symfind.h"
 
 
@@ -51,6 +56,10 @@ unsigned long find_sym_address(char *name) {
 	return finder.address;
 
 }
+
+
+
+MODULE_LICENSE("Dual BSD/GPL");
 
 
 

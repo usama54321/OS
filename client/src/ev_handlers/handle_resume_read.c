@@ -96,8 +96,8 @@
 
 
 
-#ifndef HANDLE_LOCK_READ_C
-#define HANDLE_LOCK_READ_C
+#ifndef HANDLE_RESUME_READ_C
+#define HANDLE_RESUME_READ_C
 
 
 
@@ -107,50 +107,38 @@
 #include <asm/pgtable_types.h>
 
 #include "../srvcom/srvcom.h"
-#include "../pte_funcs/pte_funcs.h"
 #include "../ev_handlers/ev_handlers.h"
 #include "../readlock_list/readlock_list.h"
 
 
 
-static int start_readlock(unsigned long vaddr, pgd_t *pgd,
-	struct readlock_list *pending_readlocks) {
+static int resolve_readlock(unsigned long vaddr, pgd_t *pgd,
+	char *pagedata, struct readlock_list *pending_readlocks) {
 
 	const pfn_t pfn =
 		{.val = vaddr>>PAGE_SHIFT};
 
-	printk(KERN_INFO "Attempting read-lock on page %p", (void*)vaddr);
+	printk(KERN_INFO "Resolving page %p", (void*)vaddr);
 
-	for_pte_pgd(pgd, vaddr, __hga_readlock);
-
-	/*
-	 * If the PTE fetch fails then there's a good chance
-	 * the reason of failure was a missing table in the
-	 * page traversal. If this is the case, and we leave
-	 * the page unlocked, a process can read the page at
-	 * some point in time before the writer process is
-	 * done writing. To prevent this we record the page
-	 * to be read-locked so that the page fault handler
-	 * ignores its read requests during this time.
-	 */
-	if ( readlock_list_add_pending(pending_readlocks, pgd, pfn) < 0 )
+	/* Just unresolve and leave the rest to the page fault handler */
+	if ( readlock_list_resolve(pending_readlocks, pgd, pfn, pagedata) < 0 )
 		return -1;
 
 	return 0;
 
 }
 
-srvcom_ackcode_t handle_ev_lock_read(struct srvcom_ctx *ctx,
+srvcom_ackcode_t handle_ev_resume_read(struct srvcom_ctx *ctx,
 	unsigned long vaddr, pid_t pid, pgd_t *pgd, char *pagedata,
 	void *cb_data) {
 
 	struct readlock_list *pending_readlocks =
 		(struct readlock_list*)cb_data;
 
-	if ( start_readlock(vaddr, pgd, pending_readlocks) < 0 )
+	if ( resolve_readlock(vaddr, pgd, pagedata, pending_readlocks) < 0 )
 		return ACKCODE_OP_FAILURE;
 
-	return ACKCODE_LOCK_READ;
+	return ACKCODE_RESUME_READ;
 
 }
 
@@ -160,7 +148,7 @@ MODULE_LICENSE("Dual BSD/GPL");
 
 
 
-#endif /* HANDLE_LOCK_READ_C */
+#endif /* HANDLE_RESUME_READ_C */
 
 
 

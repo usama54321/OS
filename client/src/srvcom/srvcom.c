@@ -106,7 +106,7 @@ static int srvcom_send(struct socket *sock, struct srvcom_msg *msg) {
 
 }
 
-static int srvcom_recv(struct socket *sock, struct srvcom_msg *msg) {
+static int __attribute__((unused)) srvcom_recv(struct socket *sock, struct srvcom_msg *msg) {
 
 	/* Receive header */
 	if ( ksock_recv(sock, (char*)&msg->hdr, sizeof(msg->hdr)) < 0 ) {
@@ -124,7 +124,7 @@ static int srvcom_recv(struct socket *sock, struct srvcom_msg *msg) {
 
 }
 
-static int srvcom_timeout_recv(struct socket *sock, struct srvcom_msg *msg
+static int srvcom_timeout_recv(struct socket *sock, struct srvcom_msg *msg,
 	unsigned long msec_timeout) {
 
 	int err_code;
@@ -133,10 +133,10 @@ static int srvcom_timeout_recv(struct socket *sock, struct srvcom_msg *msg
 	err_code = ksock_recv_timeout(sock, (char*)&msg->hdr,
 		sizeof(msg->hdr), msec_timeout);
 	if ( err_code < 0 ) {
-		printk(KERN_INFO "srvcom_recv: ksock_recv failed");
+		printk(KERN_INFO "srvcom_timeout_recv: ksock_recv failed");
 		return -1;
 	} else if ( err_code > 0 ) {
-		printk(KERN_INFO "srvcom_recv: ksock_recv timed out");
+		printk(KERN_INFO "srvcom_timeout_recv: ksock_recv timed out");
 		return 1;
 	}
 
@@ -217,7 +217,7 @@ static int srvcom_listener_thread(void *thrdata) {
 		handler_cb_data = ctx->handler_cb_data[mcode];
 
 		/* If permission was granted then reset the try count */
-		if ( msg->hdr.mcode == (srvcom_code_t)OPCODE_ALLOW_WRITE )
+		if ( msg->hdr.mcode.op.code == OPCODE_ALLOW_WRITE.code )
 			ctx->write_try_count = 0;
 
 		if ( !msg_handler )
@@ -231,7 +231,7 @@ static int srvcom_listener_thread(void *thrdata) {
 		ack_code = msg_handler(ctx, msg_vaddr,
 			msg_pid, msg_pgd, msg_page, handler_cb_data);
 
-		if ( ack_code == ACKCODE_NO_RESPONSE )
+		if ( ack_code.code == ACKCODE_NO_RESPONSE.code )
 			continue;
 
 		/* Send off acknowledgement */
@@ -414,7 +414,7 @@ int srvcom_commit_page(struct srvcom_ctx *ctx, unsigned long addr,
 			return -1;
 		}
 
-		err_code = srvcom_timeout_recv(ctx, msg);
+		err_code = srvcom_timeout_recv(sock, msg, ctx->msec_timeout);
 		if ( err_code < 0 ) {
 			printk(KERN_INFO "srvcom_commit_page: Recv error");
 			ksock_destroy(sock);
@@ -427,7 +427,7 @@ int srvcom_commit_page(struct srvcom_ctx *ctx, unsigned long addr,
 
 		/* Should not happen but handle this case anyway */
 		if (	/* Check if the reply has anything unexpected */
-			(msg->hdr.mcode != (srvcom_code_t)ACKCODE_COMMIT_PAGE)
+			(msg->hdr.mcode.ack.code != ACKCODE_COMMIT_PAGE.code)
 			|| (msg->hdr.vaddr != addr)
 			|| (msg->hdr.pid != pid)
 			|| (msg->hdr.pgd != pgd)

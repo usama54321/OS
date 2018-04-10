@@ -1,6 +1,11 @@
 
 
 
+#ifndef PAGE_FAULT_C
+#define PAGE_FAULT_C
+
+
+
 #include <linux/highmem.h>
 #include <linux/bootmem.h>
 #include <linux/sched.h>
@@ -41,6 +46,8 @@
 #include "../pte_funcs/pte_funcs.h"
 #include "../task_funcs/task_funcs.h"
 #include "../ev_handlers/ev_handlers.h"
+#include "../page_monitor/page_monitor.h"
+#include "../readlock_list/readlock_list.h"
 
 // PGFAULT_NR is the interrupt number of page fault. It is platform specific.
 #if defined(CONFIG_X86_64)
@@ -97,6 +104,99 @@ typedef void (*do_page_fault_t)(struct pt_regs*, unsigned long);
 
 
 /*
+ *
+ * NOTE:
+ *
+ *    Allow handlers can fail if the page is not present.
+ *
+ *    This does not cause problems for the writelocking
+ *    part since failing some times is feasible for the
+ *    writelocker. The server will get a failure reply
+ *    and continue to look for other write requests.
+ *
+ *    Though this should not be done for reading. If the
+ *    readlocker handler (the function that locks reads
+ *    on the server's request) fails with probability p
+ *    then with 1/p machines, 1 is expected to fail for
+ *    every readlock multicast. We don't want to expect
+ *    one failure whenever a machine requests for write
+ *    permission. We must send a success reply whether
+ *    or not the PTE modification succeeded.
+ *
+ *    No problems with write control:
+ *        Writes disabled by default
+ *        Process triggers fault handler
+ *        Fault handler requests write
+ *        Allow handler grants write
+ *        Allow handler revokes write
+ *
+ *    Problems with read control without a pending readlock list:
+ *        Reads enabled by default
+ *        Revoke handler tries to block read (success):
+ *            - Process triggers fault handler
+ *            - Fault handler denies read
+ *            - Allow handler unblocks read (success):
+ *                o All goes good
+ *            - Allow handler unblocks read (failure):
+ *                o If we enlisted the readlock we can unlock the
+ *                  page at the next readlock-generated fault if
+ *                  the readlock was resolved (we have this flag).
+ *                o If we did not then the page is fucked forever.
+ *        Revoke handler tries to block read (failure):
+ *            - Process triggers fault handler due to
+ *              page not present
+ *                o If we enlisted the readlock, the fault handler
+ *                  can prevent making the page available if the
+ *                  readlock was not resolved and could make the
+ *                  page available otherwise.
+ *                o If we did not then the process can read wrong
+ *                  page data.
+ *            - Assume fault handler successfully denies
+ *              read
+ *            - Allow handler unblocks read (success):
+ *                o All goes good
+ *            - Allow handler unblocks read (failure):
+ *                o Using readlock lists we simply resolve the node
+ *                  blocking the faults.
+ *                o Without lists we couldn't even proceed after the
+ *                  first step.
+ *
+ *    Solution with pending readlock list:
+ *        - Reads allowed by default
+ *        - Server sends readlock command
+ *        - Peer tries to lock read (success or failure,
+ *          the process will trigger the fault handler
+ *          to access the page anyway)
+ *        - Peer adds readlock entry to pending list
+ *        - Process triggers the fault handler for that
+ *          page
+ *        - Page fault handler gets a read violation
+ *          and allows/disallows based on the pending
+ *          readlocks (and commits a readlock if it
+ *          was resolved)
+ *        - Page fault handler gets a "not present"
+ *          violation and resolves/does not resolve
+ *          based on the pending readlocks (again,
+ *          committing the readlock if resolved)
+ *        - Server sends a resume command
+ *        - Peer marks readlock resolved
+ *        - Process triggers fault handler
+ *        - Fault handler sees resolved page
+ *        - Fault handler commits resolved page
+ *        - Fault handler resumes read by either making
+ *          the page available or removing the readlock
+ *
+ *    SUBNOTE:
+ *        Committing a readlock is writing the new
+ *        page data and deleting the readlock from
+ *        the list...
+ *
+ * TL;DR we must keep a record of readlocked pages
+ * to ensure reliable and fault tolerant page reads
+ *
+ */
+
+/*
  * XXX:
  *    - For now we're assuming a unique PID
  *      for every process name and that the
@@ -113,37 +213,51 @@ typedef void (*do_page_fault_t)(struct pt_regs*, unsigned long);
 
 /* Globals */
 static struct srvcom_ctx *srvctx;
+static struct readlock_list *pending_readlocks;
 
 
 
 /* Initialization */
 static int __init_srvcom(void);
+static int __init_readlocks(void);
 static int my_fault_init(void);
 /* Deinitialization */
 static void __exit_srvcom(void);
+static void __exit_readlocks(void);
 static void my_fault_exit(void);
+/* For dealing with read faults */
+static inline void __handle_usermode_read_violation(pgd_t *pgd,
+	unsigned long pf_vaddr, struct pt_regs* regs, unsigned long error_code);
+static inline void __handle_usermode_read_missingpage(pgd_t *pgd,
+	unsigned long pf_vaddr, struct pt_regs* regs, unsigned long error_code);
+static void __handle_usermode_read(pgd_t *pgd, unsigned long pf_vaddr,
+	struct pt_regs* regs, unsigned long error_code);
 
 
 
-void my_do_page_fault(struct pt_regs* regs, unsigned long error_code) {
-
-#define FOR_PTE(func) (for_pte(task->mm, pf_vaddr, __hga_##func))
+#define FOR_PTE(func) \
+	(for_pte_pgd(pgd, pf_vaddr, __hga_##func))
 
 #define ACCESS_VIOLATE	(1 << 0)
 #define WRITE_ATTEMPT	(1 << 1)
 #define USERMODE	(1 << 2)
-#define ERRCODE_MASK	( ACCESS_VIOLATE | WRITE_ATTEMPT | USERMODE )
+#define ERRCODE_MASK \
+	(ACCESS_VIOLATE|WRITE_ATTEMPT|USERMODE)
 
+#define IS_USERMODE_WRITE_VIOLATION(x) \
+	(((x)&ERRCODE_MASK) == (ACCESS_VIOLATE|WRITE_ATTEMPT|USERMODE))
+#define IS_USERMODE_READ(x) \
+	(((x)&(WRITE_ATTEMPT|USERMODE)) == USERMODE)
 
+void my_do_page_fault(struct pt_regs* regs, unsigned long error_code) {
 
-	pid_t pid; pgd_t *pgd;
 	int marked, shareable;
-	const struct task_struct *task = current;
-	const unsigned long pf_vaddr = read_cr2();
-	const do_page_fault_t pfault =
+	struct task_struct *task = current;
+	unsigned long pf_vaddr = read_cr2();
+	do_page_fault_t pfault =
 		(do_page_fault_t)addr_dft_do_page_fault;
-
-
+	pid_t pid = task->pid;
+	pgd_t *pgd = task->mm->pgd;
 
 	if ( task_targeted(task) != 1 ) {
 		/* Error or not a target process */
@@ -151,14 +265,17 @@ void my_do_page_fault(struct pt_regs* regs, unsigned long error_code) {
 		return;
 	}
 
-	pid = task->pid;
-	pgd = task->mm->pgd;
-
 	/* -1 on error, 0 if the page is not to be shared and 1 otherwise */
 	shareable = FOR_PTE(shareable);
 
+	/* TODO: Identify the segment and remove this garbage */
 	if ( shareable == 0 ) {
 		pfault(regs, error_code);
+		return;
+	}
+
+	if ( IS_USERMODE_READ(error_code) ) {
+		__handle_usermode_read(pgd, pf_vaddr, regs, error_code);
 		return;
 	}
 
@@ -170,6 +287,7 @@ void my_do_page_fault(struct pt_regs* regs, unsigned long error_code) {
 	 * attempt the fetch. If it fails on the second attempt then
 	 * we assume inaccessibility.
 	 */
+	/* TODO: Test first and then use the present flag instead */
 	if ( shareable < 0 ) {
 		pfault(regs, error_code);
 		/* Second attempt */
@@ -179,6 +297,7 @@ void my_do_page_fault(struct pt_regs* regs, unsigned long error_code) {
 
 	/* At this point the page fault is from our target process and involves a shareable page */
 
+	/* TODO: Test for whether we even need this */
 	marked = FOR_PTE(marked);
 
 	/*
@@ -188,7 +307,7 @@ void my_do_page_fault(struct pt_regs* regs, unsigned long error_code) {
 	 * page for interception and leave without taking
 	 * further action.
 	 */
-	if ( !marked || (error_code&ERRCODE_MASK) != (ACCESS_VIOLATE|WRITE_ATTEMPT|USERMODE) ) {
+	if ( !marked || !IS_USERMODE_WRITE_VIOLATION(error_code) ) {
 		pfault(regs, error_code);
 		if ( error_code&USERMODE ) { /* Only deal with usermode requests */
 			FOR_PTE(mark); /* To make sure it is marked next time */
@@ -210,7 +329,92 @@ void my_do_page_fault(struct pt_regs* regs, unsigned long error_code) {
 
 	return;
 
+}
 
+
+
+static void __handle_usermode_read(pgd_t *pgd, unsigned long pf_vaddr,
+	struct pt_regs* regs, unsigned long error_code) {
+
+	if ( error_code & ACCESS_VIOLATE )
+		__handle_usermode_read_violation(pgd, pf_vaddr, regs, error_code);
+	else
+		__handle_usermode_read_missingpage(pgd, pf_vaddr, regs, error_code);
+
+	return;
+
+}
+
+static inline void __handle_usermode_read_violation(pgd_t *pgd,
+	unsigned long pf_vaddr, struct pt_regs* regs, unsigned long error_code) {
+
+	pfn_t pfn = {.val = pf_vaddr>>PAGE_SHIFT};
+	struct readlock *readlocked =
+		readlock_list_find(pending_readlocks, pgd, pfn);
+
+	/*
+	 * Remember that it is okay for for_pte_pgd
+	 * to fail since that would cause the next
+	 * read to trigger another page fault.
+	 */
+
+	if ( !readlocked ) {
+		for_pte_pgd(pgd, pf_vaddr, __hga_readunlock);
+		return;
+	}
+
+	if ( !readlocked->resolved_page )
+		return;
+
+	if ( for_pte_pgd(pgd, pf_vaddr, __hga_readunlock) < 0 )
+		return;
+	if ( set_page_data(pgd, pf_vaddr, readlocked->resolved_page) < 0 )
+		/* Shouldn't happen */
+		for_pte_pgd(pgd, pf_vaddr, __hga_readlock);
+	else
+		readlock_list_remove(pending_readlocks, pgd, pfn);
+
+	return;
+
+}
+
+static inline void __handle_usermode_read_missingpage(pgd_t *pgd,
+	unsigned long pf_vaddr, struct pt_regs* regs, unsigned long error_code) {
+
+	do_page_fault_t pfault =
+		(do_page_fault_t)addr_dft_do_page_fault;
+	pfn_t pfn = {.val = pf_vaddr>>PAGE_SHIFT};
+	struct readlock *readlocked =
+		readlock_list_find(pending_readlocks, pgd, pfn);
+
+	/*
+	 * Remember that it is okay for for_pte_pgd
+	 * to fail since that would cause the next
+	 * read to trigger another page fault.
+	 */
+
+	if ( !readlocked ) {
+		pfault(regs, error_code);
+		return;
+	}
+
+	if ( !readlocked->resolved_page )
+		return;
+
+	pfault(regs, error_code);
+	if ( set_page_data(pgd, pf_vaddr, readlocked->resolved_page) < 0 )
+		/* Shouldn't happen */
+		for_pte_pgd(pgd, pf_vaddr, __hga_readlock);
+	else
+		readlock_list_remove(pending_readlocks, pgd, pfn);
+
+	return;
+
+}
+
+#undef IS_USERMODE_READ_MISSINGPAGE
+#undef IS_USERMODE_WRITE_VIOLATION
+#undef IS_USERMODE_READ_VIOLATION
 
 #undef ERRCODE_MASK
 #undef USERMODE
@@ -218,8 +422,6 @@ void my_do_page_fault(struct pt_regs* regs, unsigned long error_code) {
 #undef ACCESS_VIOLATE
 
 #undef FOR_PTE
-
-}
 
 
 
@@ -245,6 +447,8 @@ static int my_fault_init(void) {
 
 	if ( __init_srvcom() < 0 )
 		return -1;
+	if ( __init_readlocks() < 0 )
+		return -1;
 
 	return 0;
 
@@ -259,10 +463,25 @@ static int __init_srvcom(void) {
 
 	srvcom_set_serv_addr(srvctx, SERVER_IP, SERVER_PORT);
 
+	/* srvcom context, opcode, callback, callback data */
 	srvcom_register_handler(srvctx, OPCODE_ALLOW_WRITE, handle_ev_allow_write, NULL);
+	srvcom_register_handler(srvctx, OPCODE_LOCK_READ, handle_ev_lock_read, pending_readlocks);
+	srvcom_register_handler(srvctx, OPCODE_RESUME_READ, handle_ev_resume_read, pending_readlocks);
+	srvcom_register_handler(srvctx, OPCODE_PING_ALIVE, handle_ev_ping_alive, NULL);
 
 	if ( srvcom_run(srvctx) < 0 ) {
 		printk(KERN_INFO "__init_srvcom: Failed to start srvcom");
+		return -1;
+	}
+
+	return 0;
+
+}
+
+static int __init_readlocks(void) {
+
+	if ( !(pending_readlocks = readlock_list_new()) ) {
+		printk(KERN_INFO "__init_readlocks: Failed allocation");
 		return -1;
 	}
 
@@ -275,6 +494,7 @@ static int __init_srvcom(void) {
 static void my_fault_exit(void) {
 
 	__exit_srvcom();
+	__exit_readlocks();
 
 	return;
 
@@ -283,6 +503,14 @@ static void my_fault_exit(void) {
 static void __exit_srvcom(void) {
 
 	srvcom_exit(srvctx);
+
+	return;
+
+}
+
+static void __exit_readlocks(void) {
+
+	readlock_list_free(pending_readlocks);
 
 	return;
 
@@ -405,6 +633,10 @@ void unregister_my_page_fault_handler(void){
 
 
 MODULE_LICENSE("Dual BSD/GPL");
+
+
+
+#endif /* PAGE_FAULT_C */
 
 
 

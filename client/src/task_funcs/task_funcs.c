@@ -21,10 +21,37 @@
 
 
 
+#include <linux/mm.h>
+#include <linux/gfp.h>
+#include <linux/pci.h>
+#include <linux/pfn.h>
+#include <linux/slab.h>
+#include <linux/errno.h>
+#include <linux/types.h>
 #include <linux/sched.h>
-#include <linux/kernel.h>
+#include <linux/percpu.h>
 #include <linux/module.h>
-#include <linux/pgtable_types.h>
+#include <linux/kernel.h>
+#include <linux/uaccess.h>
+#include <linux/highmem.h>
+#include <linux/bootmem.h>
+#include <linux/debugfs.h>
+#include <linux/vmalloc.h>
+#include <linux/seq_file.h>
+#include <linux/interrupt.h>
+#include <linux/moduleparam.h>
+
+#include <asm/pat.h>
+#include <asm/proto.h>
+#include <asm/traps.h>
+#include <asm/setup.h>
+#include <asm/pgalloc.h>
+#include <asm/uaccess.h>
+#include <asm/sections.h>
+#include <asm/tlbflush.h>
+#include <asm/desc_defs.h>
+#include <asm/processor.h>
+#include <asm/pgtable_types.h>
 
 #include "../common/hga_defs.h"
 #include "../task_funcs/task_funcs.h"

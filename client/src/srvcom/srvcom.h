@@ -27,28 +27,31 @@ typedef struct {unsigned char code;} srvcom_opcode_t;
 typedef struct {unsigned char code;} srvcom_ackcode_t;
 
 /* Requests */
-#define OPCODE_REQUEST_WRITE	(srvcom_opcode_t){.code = 0x00}
-#define OPCODE_ALLOW_WRITE	(srvcom_opcode_t){.code = 0x01}
-#define OPCODE_COMMIT_PAGE	(srvcom_opcode_t){.code = 0x02}
-#define OPCODE_LOCK_READ	(srvcom_opcode_t){.code = 0x03}
-#define OPCODE_RESUME_READ	(srvcom_opcode_t){.code = 0x04}
+#define OPCODE_REQUEST_WRITE	((srvcom_opcode_t){.code = 0x00})
+#define OPCODE_ALLOW_WRITE	((srvcom_opcode_t){.code = 0x01})
+#define OPCODE_COMMIT_PAGE	((srvcom_opcode_t){.code = 0x02})
+#define OPCODE_LOCK_READ	((srvcom_opcode_t){.code = 0x03})
+#define OPCODE_RESUME_READ	((srvcom_opcode_t){.code = 0x04})
+#define OPCODE_PING_ALIVE	((srvcom_opcode_t){.code = 0x05})
 /* Responses */
-#define ACKCODE_REQUEST_WRITE	(srvcom_ackcode_t){.code = 0x05}
-#define ACKCODE_ALLOW_WRITE	(srvcom_ackcode_t){.code = 0x06}
-#define ACKCODE_COMMIT_PAGE	(srvcom_ackcode_t){.code = 0x07}
-#define ACKCODE_LOCK_READ	(srvcom_ackcode_t){.code = 0x08}
-#define ACKCODE_RESUME_READ	(srvcom_ackcode_t){.code = 0x09}
-#define ACKCODE_NO_RESPONSE	(srvcom_ackcode_t){.code = 0x0A}
-#define ACKCODE_OP_FAILURE	(srvcom_ackcode_t){.code = 0x0B}
+#define ACKCODE_REQUEST_WRITE	((srvcom_ackcode_t){.code = 0x06})
+#define ACKCODE_ALLOW_WRITE	((srvcom_ackcode_t){.code = 0x07})
+#define ACKCODE_COMMIT_PAGE	((srvcom_ackcode_t){.code = 0x08})
+#define ACKCODE_LOCK_READ	((srvcom_ackcode_t){.code = 0x09})
+#define ACKCODE_RESUME_READ	((srvcom_ackcode_t){.code = 0x0A})
+#define ACKCODE_PING_ALIVE	((srvcom_ackcode_t){.code = 0x0B})
+#define ACKCODE_NO_RESPONSE	((srvcom_ackcode_t){.code = 0x0C})
+#define ACKCODE_OP_FAILURE	((srvcom_ackcode_t){.code = 0x0D})
 
 
+
+struct srvcom_ctx;
 
 typedef union {
 	srvcom_opcode_t op;
 	srvcom_ackcode_t ack;
+	unsigned char code;
 } srvcom_code_t;
-
-
 
 /* Return the appropriate response code */
 typedef srvcom_ackcode_t (*srvcom_handler_t)(struct srvcom_ctx *ctx,
@@ -76,6 +79,8 @@ struct srvcom_ctx {
 	int write_try_count;
 
 };
+
+
 
 struct srvcom_ctx *srvcom_ctx_new(void);
 void srvcom_set_serv_addr(struct srvcom_ctx *ctx,
