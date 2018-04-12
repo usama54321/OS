@@ -1,7 +1,12 @@
-#include <linux/hashtable.h>
-#include <linux/list.h>
+#ifndef HGA_HASH
+#define HGA_HASH
 
-typedef void (*callBackFunc)(void*, void*);
+#include <linux/list.h>
+#include <linux/slab.h>
+#include <linux/hashtable.h>
+#include <linux/types.h>
+
+typedef void (*callBackFunc)(void*, void*, void* );
 
 struct pid_hashtable_entry {
     struct list_head list;
@@ -9,22 +14,25 @@ struct pid_hashtable_entry {
     pid_t pid;
 };
 
-struct vaddr_hashtable_entry {
+struct client_hashtable_entry {
     struct list_head list;
-    unsigned long pte_addr;
+    unsigned long ip;
+    unsigned long pgd;
 };
 
-static pid_hashtable_entry *p_hash;
-static vaddr_hashtable_entry *vaddr_hash;
+struct vaddr_hashtable_entry {
+    struct list_head list;
+    unsigned long pfn_addr;
+    pid_t pid;
+    struct client_hashtable_entry* clients;
+    bool locked;
+};
 
-/*
- * locks for hashtables
- */
-static spinlock_t *pid_lock;
-static spinlock_t *vaddr_lock;
-
-int init();
+int hashtables_init(void);
 void add_pid_hashtable_entry(struct pid_hashtable_entry* entry);
 void add_vaddr_hashtable_entry(struct vaddr_hashtable_entry* entry);
-void search_pid_hashtable(callBackFunc, void* arg);
-void search_vaddr_hashtable(callBackFunc, void* arg);
+void foreach_pid_hashtable(callBackFunc, void*, void* );
+void foreach_vaddr_hashtable(callBackFunc, void*, void*);
+struct vaddr_hashtable_entry* make_vaddr_hashtable_entry(unsigned long pfn, pid_t pid, bool locked, unsigned long client_ip, unsigned long client_pgd);
+
+#endif

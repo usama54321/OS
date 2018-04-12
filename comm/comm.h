@@ -21,14 +21,13 @@ typedef union {
 	comm_ackcode_t ack;
 } comm_code_t;
 
-struct comm_msg_hdr {
+struct comm_message_hdr {
 
 	comm_code_t mcode;
 
 	unsigned long vaddr;
-	pid_t pid;
-	pgd_t *pgd;
-
+	unsigned long token;
+    unsigned long pgd;    
 	int payload_len;
 
 } __attribute__((packed));
@@ -41,7 +40,7 @@ struct comm_message_data {
 
 struct comm_message {
 
-	struct comm_msg_hdr hdr;
-	struct comm_msg_data data;
+	struct comm_message_hdr hdr;
+	struct comm_message_data data;
 
 } __attribute__((packed));
