@@ -8,6 +8,7 @@ megavm_server-objs :=				\
 	server/server.o				\
 	hashtable/hashtable.o		\
 	tests/test.o				\
+	pgtable/pgtable.o			\
 	main.o
 
 

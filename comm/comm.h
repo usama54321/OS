@@ -4,6 +4,7 @@
 #define OPCODE_COMMIT_PAGE	(comm_opcode_t){.code = 0x02}
 #define OPCODE_LOCK_READ	(comm_opcode_t){.code = 0x03}
 #define OPCODE_RESUME_READ	(comm_opcode_t){.code = 0x04}
+#define OPCODE_INITIAL_READ (comm_opcode_t){.code = 0x05}
 /* Responses */
 #define ACKCODE_REQUEST_WRITE	(comm_ackcode_t){.code = 0x05}
 #define ACKCODE_ALLOW_WRITE	(comm_ackcode_t){.code = 0x06}
@@ -12,6 +13,7 @@
 #define ACKCODE_RESUME_READ	(comm_ackcode_t){.code = 0x09}
 #define ACKCODE_NO_RESPONSE	(comm_ackcode_t){.code = 0x0A}
 #define ACKCODE_OP_FAILURE	(comm_ackcode_t){.code = 0x0B}
+#define ACKCODE_INITIAL_READ (comm_ackcode_t){.code = 0x0C}
 
 typedef struct {unsigned char code;} comm_opcode_t;
 typedef struct {unsigned char code;} comm_ackcode_t;
@@ -26,7 +28,8 @@ struct comm_message_hdr {
 	comm_code_t mcode;
 
 	unsigned long vaddr;
-	unsigned long token;
+    unsigned long pid;
+	unsigned long server_pid;
     unsigned long pgd;    
 	int payload_len;
 

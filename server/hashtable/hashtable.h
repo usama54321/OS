@@ -31,6 +31,10 @@ struct vaddr_hashtable_entry {
 int hashtables_init(void);
 void add_pid_hashtable_entry(struct pid_hashtable_entry* entry);
 void add_vaddr_hashtable_entry(struct vaddr_hashtable_entry* entry);
+void add_client_hashtable_entry(struct client_hashtable_entry* entry, struct client_hashtable_entry* existing);
+void lock_vaddr_hashtable(void);
+void unlock_vaddr_hashtable(void);
+
 void foreach_pid_hashtable(callBackFunc, void*, void* );
 void foreach_vaddr_hashtable(callBackFunc, void*, void*);
 struct vaddr_hashtable_entry* make_vaddr_hashtable_entry(unsigned long pfn, pid_t pid, bool locked, unsigned long client_ip, unsigned long client_pgd);

@@ -36,6 +36,13 @@ void add_vaddr_hashtable_entry(struct vaddr_hashtable_entry* entry) {
     spin_unlock(&vaddr_lock);
 }
 
+void add_client_hashtable_entry(struct client_hashtable_entry* entry, struct client_hashtable_entry* existing) {
+    spin_lock(&vaddr_lock);
+    list_add_tail(&(entry->list), &(existing->list));
+    spin_unlock(&vaddr_lock);
+    return;
+}
+
 void foreach_pid_hashtable(callBackFunc func, void* entry, void* arg) {
     struct pid_hashtable_entry* temp;
     spin_lock(&pid_lock);
@@ -65,4 +72,12 @@ struct vaddr_hashtable_entry* make_vaddr_hashtable_entry(unsigned long pfn, pid_
     entry->clients->pgd = client_pgd;
     INIT_LIST_HEAD(&(entry->clients->list));
     return entry;
+}
+
+void lock_vaddr_hashtable(void) {
+    spin_lock(&vaddr_lock);
+}
+
+void unlock_vaddr_hashtable(void) {
+    spin_unlock(&vaddr_lock);
 }
