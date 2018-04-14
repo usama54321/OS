@@ -172,7 +172,7 @@ static int srvcom_listener_thread(void *thrdata) {
 		return -1;
 	}
 
-	if ( ksock_create(&ctx->listener_sock) < 0 ) {
+	if ( !(ctx->listener_sock = ksock_socket_create()) ) {
 		printk(KERN_INFO "srvcom_listener_thread: Failed to create socket");
 		kfree(msg);
 		return -1;
@@ -180,7 +180,7 @@ static int srvcom_listener_thread(void *thrdata) {
 
 	if ( ksock_connect(ctx->listener_sock, &ctx->serv_addr) < 0 ) {
 		printk(KERN_INFO "srvcom_listener_thread: Failed to connect to server");
-		ksock_destroy(ctx->listener_sock);
+		ksock_socket_destroy(ctx->listener_sock);
 		kfree(msg);
 		return -1;
 	}
@@ -203,7 +203,7 @@ static int srvcom_listener_thread(void *thrdata) {
 		err_code = srvcom_timeout_recv(ctx->listener_sock, msg, ctx->msec_timeout);
 		if ( err_code < 0 ) {
 			printk(KERN_INFO "srvcom_listener_thread: Lost connection");
-			ksock_destroy(ctx->listener_sock);
+			ksock_socket_destroy(ctx->listener_sock);
 			kfree(msg);
 			return -1;
 		} else if ( err_code > 0 ) {
@@ -245,7 +245,7 @@ static int srvcom_listener_thread(void *thrdata) {
 		spin_unlock(&ctx->listener_inject_lock);
 		if ( err_code < 0 ) {
 			printk(KERN_INFO "srvcom_listener_thread: Lost connection");
-			ksock_destroy(ctx->listener_sock);
+			ksock_socket_destroy(ctx->listener_sock);
 			kfree(msg);
 			return -1;
 		}
@@ -383,7 +383,7 @@ int srvcom_commit_page(struct srvcom_ctx *ctx, unsigned long addr,
 		return -1;
 	}
 
-	if ( ksock_create(&sock) < 0 ) {
+	if ( !(sock = ksock_socket_create()) ) {
 		printk(KERN_INFO "srvcom_commit_page: Failed to create socket");
 		kfree(msg);
 		return -1;
@@ -391,7 +391,7 @@ int srvcom_commit_page(struct srvcom_ctx *ctx, unsigned long addr,
 
 	if ( ksock_connect(sock, &ctx->serv_addr) < 0 ) {
 		printk(KERN_INFO "srvcom_commit_page: Failed to connect to server");
-		ksock_destroy(sock);
+		ksock_socket_destroy(sock);
 		kfree(msg);
 		return -1;
 	}
@@ -409,7 +409,7 @@ int srvcom_commit_page(struct srvcom_ctx *ctx, unsigned long addr,
 
 		if ( srvcom_send(sock, msg) < 0 ) {
 			printk(KERN_INFO "srvcom_commit_page: Send error");
-			ksock_destroy(sock);
+			ksock_socket_destroy(sock);
 			kfree(msg);
 			return -1;
 		}
@@ -417,7 +417,7 @@ int srvcom_commit_page(struct srvcom_ctx *ctx, unsigned long addr,
 		err_code = srvcom_timeout_recv(sock, msg, ctx->msec_timeout);
 		if ( err_code < 0 ) {
 			printk(KERN_INFO "srvcom_commit_page: Recv error");
-			ksock_destroy(sock);
+			ksock_socket_destroy(sock);
 			kfree(msg);
 			return -1;
 		} else if ( err_code > 0 ) {
@@ -447,7 +447,7 @@ int srvcom_commit_page(struct srvcom_ctx *ctx, unsigned long addr,
 
 	}
 
-	ksock_destroy(sock);
+	ksock_socket_destroy(sock);
 	kfree(msg);
 
 	return 0;
@@ -460,7 +460,7 @@ void srvcom_exit(struct srvcom_ctx *ctx) {
 		return;
 
 	if ( ctx->listener_sock )
-		ksock_destroy(ctx->listener_sock);
+		ksock_socket_destroy(ctx->listener_sock);
 	if ( ctx->listener_thread )
 		kthread_stop(ctx->listener_thread);
 

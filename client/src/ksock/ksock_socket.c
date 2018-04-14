@@ -32,21 +32,23 @@
 
 
 
-int ksock_create(struct socket **sock) {
+struct socket *ksock_socket_create(void) {
 
-	if ( sock_create(PF_INET, SOCK_STREAM, IPPROTO_TCP, sock) < 0 ) {
+	struct socket *sock;
+
+	if ( sock_create(PF_INET, SOCK_STREAM, IPPROTO_TCP, &sock) < 0 ) {
 		printk(KERN_ERR "ksock_new: Failed to create socket");
-		return -1;
+		return NULL;
 	}
 
-	return 0;
+	return sock;
 
 }
 
 int ksock_connect(struct socket *sock, struct sockaddr_in *serv_addr) {
 
 	int error_code;
-	size_t addrlen = sizeof(struct sockaddr_in);
+	int addrlen = sizeof(struct sockaddr_in);
 
 	error_code = sock->ops->connect(sock,
 		(struct sockaddr*)serv_addr, addrlen, O_RDWR);
@@ -133,6 +135,75 @@ int ksock_recv(struct socket *sock, char *buf, int len) {
 
 }
 
+int ksock_accept_ready(struct socket *listener_sock) {
+
+	struct inet_connection_sock *icsock =
+		inet_csk(listener_sock->sk);
+
+	return reqsk_queue_empty(&icsock->icsk_accept_queue) ? 0 : 1;
+
+}
+
+int ksock_recv_ready(struct socket *conn_sock) {
+
+	return skb_queue_empty(&conn_sock->sk->sk_receive_queue) ? 0 : 1;
+
+}
+
+/* Non-blocking */
+struct socket *ksock_accept(struct socket *listener_sock,
+	struct sockaddr *client_addr, int *addr_len) {
+
+	int err_code;
+	struct socket *conn_sock;
+	struct inet_connection_sock *icsock;
+
+	icsock = inet_csk(listener_sock->sk);
+	if ( reqsk_queue_empty(&icsock->icsk_accept_queue) ) {
+		/* No connection requests yet */
+		return NULL;
+	}
+
+	err_code = sock_create(listener_sock->sk->sk_family, listener_sock->type,
+		listener_sock->sk->sk_protocol, &conn_sock);
+	if ( err_code < 0 || !conn_sock ) {
+		printk(KERN_ERR "ksock_accept: Failed to create connection socket");
+		return NULL;
+	}
+
+	conn_sock->type = listener_sock->type;
+	conn_sock->ops = listener_sock->ops;
+
+	err_code = listener_sock->ops->accept(listener_sock, conn_sock, O_NONBLOCK);
+	if ( err_code < 0 ) {
+		printk(KERN_ERR "ksock_accept: Failed to accept connection socket");
+		return NULL;
+	}
+
+	err_code = conn_sock->ops->getname(conn_sock, client_addr, addr_len, 2);
+	if ( err_code < 0 ) {
+		printk(KERN_ERR "ksock_accept: Failed to get client name");
+		return NULL;
+	}
+
+	return conn_sock;
+
+}
+
+int ksock_listen(struct socket *listener_sock, int conn_backlog) {
+
+	int err_code =
+		listener_sock->ops->listen(listener_sock, conn_backlog);
+
+	if ( err_code < 0 ) {
+		printk(KERN_ERR "ksock_listen: listen() failed");
+		return -1;
+	}
+
+	return 0;
+
+}
+
 int ksock_recv_timeout(struct socket *sock, char *buf, int len,
 	unsigned long timeout_msecs) {
 
@@ -175,7 +246,7 @@ int ksock_recv_timeout(struct socket *sock, char *buf, int len,
 
 }
 
-void ksock_destroy(struct socket *sock) {
+void ksock_socket_destroy(struct socket *sock) {
 
 	if ( sock != NULL )
 		sock_release(sock);

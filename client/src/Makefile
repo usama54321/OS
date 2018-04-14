@@ -9,7 +9,8 @@ megavm_hga-objs :=				\
 	ev_handlers/handle_lock_read.o		\
 	ev_handlers/handle_ping_alive.o		\
 	ev_handlers/handle_resume_read.o	\
-	ksock/ksock.o				\
+	ksock/ksock_socket.o			\
+	ksock/ksock_select.o			\
 	readlock_list/readlock_list.o		\
 	srvcom/srvcom.o				\
 	task_funcs/task_funcs.o			\
