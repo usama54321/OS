@@ -10,8 +10,8 @@
 
 
 
-#ifndef KSOCK_C
-#define KSOCK_C
+#ifndef KSOCK_SOCKET_C
+#define KSOCK_SOCKET_C
 
 
 
@@ -261,7 +261,7 @@ MODULE_LICENSE("Dual BSD/GPL");
 
 
 
-#endif /* KSOCK_C */
+#endif /* KSOCK_SOCKET_C */
 
 
 
