@@ -6,7 +6,10 @@ NAME=megavm_server
 obj-m += megavm_server.o
 megavm_server-objs :=				\
 	server/server.o				\
-	hashtable/hashtable.o		\
+	comm/comm.o				\
+	ksock/ksock_socket.o			\
+	ksock/ksock_select.o			\
+	hashtable/hashtable.o			\
 	tests/test.o				\
 	pgtable/pgtable.o			\
 	main.o

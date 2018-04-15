@@ -159,6 +159,7 @@ static int srvcom_timeout_recv(struct socket *sock, struct srvcom_msg *msg,
  */
 static int srvcom_listener_thread(void *thrdata) {
 
+	int err_code;
 	struct srvcom_msg *msg;
 	struct srvcom_ctx *ctx =
 		(struct srvcom_ctx*)thrdata;
@@ -178,7 +179,9 @@ static int srvcom_listener_thread(void *thrdata) {
 		return -1;
 	}
 
-	if ( ksock_connect(ctx->listener_sock, &ctx->serv_addr) < 0 ) {
+	err_code = ksock_connect(ctx->listener_sock,
+		(struct sockaddr*)&ctx->serv_addr, sizeof(ctx->serv_addr));
+	if ( err_code < 0 ) {
 		printk(KERN_INFO "srvcom_listener_thread: Failed to connect to server");
 		ksock_socket_destroy(ctx->listener_sock);
 		kfree(msg);
@@ -285,7 +288,7 @@ void srvcom_set_serv_addr(struct srvcom_ctx *ctx,
 	const char *ip, int port) {
 
 	memset(&(ctx->serv_addr), 0, sizeof(ctx->serv_addr));
-	ctx->serv_addr.sin_family = AF_INET;
+	ctx->serv_addr.sin_family = PF_INET;
 	ctx->serv_addr.sin_port = htons(port);
 	ctx->serv_addr.sin_addr.s_addr = htonl(str2ip(ip));
 
@@ -369,6 +372,57 @@ int srvcom_request_write(struct srvcom_ctx *ctx, unsigned long addr,
 /*
  * Send the modified page to the server before
  * releasing page access
+ *
+ * XXX: *** WARNING *** :XXX
+ *    Without the delivery guarantee of TCP this
+ *    is *NOT* safe to use. Find a workaround as
+ *    soon as possible.
+ */
+int srvcom_commit_page(struct srvcom_ctx *ctx, unsigned long addr,
+	pid_t pid, pgd_t *pgd, char *pagedata) {
+
+	struct srvcom_msg *msg;
+
+	msg = (struct srvcom_msg*)kmalloc(
+		sizeof(struct srvcom_msg) + PAGE_SIZE, GFP_KERNEL);
+	if ( !msg ) {
+		printk(KERN_INFO "srvcom_commit_page: Allocation failure");
+		return -1;
+	}
+
+	msg->hdr.mcode = (srvcom_code_t)OPCODE_COMMIT_PAGE;
+	msg->hdr.vaddr = addr;
+	msg->hdr.pid = pid;
+	msg->hdr.pgd = pgd;
+	msg->hdr.payload_len = PAGE_SIZE;
+	memcpy(msg->data.payload, pagedata, PAGE_SIZE);
+
+	if ( srvcom_listener_inject(ctx, msg) < 0 ) {
+		printk(KERN_INFO "srvcom_commit_page: Injection failure");
+		kfree(msg);
+		return -1;
+	}
+
+	kfree(msg);
+
+	return 0;
+
+}
+
+#if 0
+/*
+ * TODO:
+ *    The following commit implementation blocked until
+ *    the server would respond and hence required a new
+ *    connection to be established, which can severely
+ *    fuck up the server's design. Currently everything
+ *    is working with TCP so we still have some degree
+ *    of delivery guarantee. Before moving to datagram
+ *    however, a workaround must be implemented. Better
+ *    if the event handlers are designed to receive and
+ *    handle acknowledgement codes so that they are able
+ *    to continue delivery in a kthread and destroy the
+ *    kthread on an ACK receipt.
  */
 int srvcom_commit_page(struct srvcom_ctx *ctx, unsigned long addr,
 	pid_t pid, pgd_t *pgd, char *pagedata) {
@@ -389,7 +443,7 @@ int srvcom_commit_page(struct srvcom_ctx *ctx, unsigned long addr,
 		return -1;
 	}
 
-	if ( ksock_connect(sock, &ctx->serv_addr) < 0 ) {
+	if ( ksock_connect(sock, (struct sockaddr*)&ctx->serv_addr, sizeof(ctx->serv_addr)) < 0 ) {
 		printk(KERN_INFO "srvcom_commit_page: Failed to connect to server");
 		ksock_socket_destroy(sock);
 		kfree(msg);
@@ -453,6 +507,7 @@ int srvcom_commit_page(struct srvcom_ctx *ctx, unsigned long addr,
 	return 0;
 
 }
+#endif
 
 void srvcom_exit(struct srvcom_ctx *ctx) {
 

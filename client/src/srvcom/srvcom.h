@@ -90,9 +90,9 @@ void srvcom_register_handler(struct srvcom_ctx *ctx,
 	srvcom_opcode_t opcode, srvcom_handler_t handler, void *cb_data);
 int srvcom_run(struct srvcom_ctx *ctx);
 int srvcom_request_write(struct srvcom_ctx *ctx, unsigned long addr,
-	 pid_t pid, pgd_t *pgd);
+	pid_t pid, pgd_t *pgd);
 int srvcom_commit_page(struct srvcom_ctx *ctx, unsigned long addr,
-	 pid_t pid, pgd_t *pgd, char *pagedata);
+	pid_t pid, pgd_t *pgd, char *pagedata);
 void srvcom_exit(struct srvcom_ctx *ctx);
 
 
