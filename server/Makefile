@@ -10,6 +10,10 @@ megavm_server-objs :=				\
 	ksock/ksock_socket.o			\
 	ksock/ksock_select.o			\
 	hashtable/hashtable.o			\
+	ev_handlers/handle_commit_page.o \
+	ev_handlers/handle_initial_read.o \
+	ev_handlers/handle_request_write.o \
+	ev_handlers/helpers.o			\
 	tests/test.o				\
 	pgtable/pgtable.o			\
 	main.o

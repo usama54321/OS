@@ -5,14 +5,19 @@
 
 static int server_init(void){
    
-    int pass;
     printk(KERN_INFO "megavm_server: Init.\n");
-    hashtables_init();
+    hashtable_init();
+    if (!init_server()) {
+        printk(KERN_INFO "failed to initialize server");
+        return 1;
+    }
+    /*
     pass = hashtable_tests();
     if(!pass) {
         printk(KERN_INFO "tests failed");
         return 1;
     }
+    */
     return 0;
 }
 

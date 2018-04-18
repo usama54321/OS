@@ -2,82 +2,69 @@
 
 /*
  * locks for hashtables
- */
 static DEFINE_SPINLOCK(pid_lock);
 static DEFINE_SPINLOCK(vaddr_lock);
+ */
 
-static struct pid_hashtable_entry *p_hash;
-static struct vaddr_hashtable_entry *vaddr_hash;
+static struct mapped_page *pf_list;
 
-int hashtables_init(void) {
-    p_hash = (struct pid_hashtable_entry*) kmalloc(sizeof(struct pid_hashtable_entry), GFP_KERNEL);
-    if (!p_hash)
+int hashtable_init(void) {
+    pf_list = (struct mapped_page*) kmalloc(sizeof(struct mapped_page), GFP_KERNEL);
+
+    if (!pf_list)
         return 0;
-    INIT_LIST_HEAD(&(p_hash->list));
-
-    vaddr_hash = (struct vaddr_hashtable_entry*) kmalloc(sizeof(struct vaddr_hashtable_entry), GFP_KERNEL);
-
-    if (!vaddr_hash)
-        return 0;
-    INIT_LIST_HEAD(&(vaddr_hash->list));
+    memset(pf_list, 0, sizeof(struct mapped_page));
+    INIT_LIST_HEAD(&(pf_list->list));
 
     return 1;
 }
 
-void add_pid_hashtable_entry(struct pid_hashtable_entry* entry) {
-    spin_lock(&pid_lock);
-    list_add_tail(&(entry->list), &(p_hash->list));
-    spin_unlock(&pid_lock);
+void add_mapped_page(struct mapped_page* entry) {
+    list_add_tail(&(entry->list), &(pf_list->list));
 }
 
-void add_vaddr_hashtable_entry(struct vaddr_hashtable_entry* entry) {
-    spin_lock(&vaddr_lock);
-    list_add_tail(&(entry->list), &(vaddr_hash->list));
-    spin_unlock(&vaddr_lock);
-}
-
-void add_client_hashtable_entry(struct client_hashtable_entry* entry, struct client_hashtable_entry* existing) {
-    spin_lock(&vaddr_lock);
+void add_client_entry(struct client_entry* entry, struct client_entry* existing) {
     list_add_tail(&(entry->list), &(existing->list));
-    spin_unlock(&vaddr_lock);
     return;
 }
 
-void foreach_pid_hashtable(callBackFunc func, void* entry, void* arg) {
-    struct pid_hashtable_entry* temp;
-    spin_lock(&pid_lock);
-    list_for_each_entry(temp, &(p_hash->list), list) {
+void foreach_mapped_page(callBackFunc func, void* entry, void* arg) {
+    struct mapped_page* temp;
+    list_for_each_entry(temp, &(pf_list->list), list) {
         func((void*)temp, entry, arg);
     }
-    spin_unlock(&pid_lock);
 }
 
-void foreach_vaddr_hashtable(callBackFunc func, void* entry, void* arg) {
-    struct vaddr_hashtable_entry* temp;
-    spin_lock(&vaddr_lock);
-    list_for_each_entry(temp, &(vaddr_hash->list), list) {
-        func((void*)temp, entry, arg);
+struct client_entry* make_client_entry(struct socket *sock, pgd_t *pgd, pid_t pid_client) {
+    struct client_entry *entry = 
+        kmalloc(sizeof(struct client_entry), GFP_KERNEL);
+
+    if(!entry) {
+        printk(KERN_ERR "failed to make client entry");
+        return NULL;
     }
-    spin_unlock(&vaddr_lock);
-}
 
-struct vaddr_hashtable_entry* make_vaddr_hashtable_entry(unsigned long pfn, pid_t pid, bool locked, unsigned long client_ip, unsigned long client_pgd) {
-    struct vaddr_hashtable_entry* entry = 
-        kmalloc(sizeof(*entry), GFP_KERNEL);
-    entry->pfn_addr = pfn;
-    entry->pid = pid;
-    entry->locked = true;
-    entry->clients = kmalloc(sizeof(struct client_hashtable_entry), GFP_KERNEL);
-    entry->clients->ip = client_ip;
-    entry->clients->pgd = client_pgd;
-    INIT_LIST_HEAD(&(entry->clients->list));
+    INIT_LIST_HEAD(&(entry->list));
+    entry->socket = sock;
+    entry->pgd = pgd;
+    entry->pid = pid_client;
     return entry;
 }
 
-void lock_vaddr_hashtable(void) {
-    spin_lock(&vaddr_lock);
-}
+struct mapped_page* make_mapped_page(unsigned long pfn, pid_t token, bool locked, void* page_addr) {
+    struct mapped_page* entry = 
+        kmalloc(sizeof(*entry), GFP_KERNEL);
+    memset(entry, 0, sizeof(struct mapped_page));
+    
+    if(!entry) {
+        printk(KERN_ERR "failed to make page entry");
+        return NULL;
+    }
 
-void unlock_vaddr_hashtable(void) {
-    spin_unlock(&vaddr_lock);
+    INIT_LIST_HEAD(&(entry->list));
+    entry->pfn = pfn;
+    entry->locked = locked;
+    entry->token = token;
+    entry->page_addr = page_addr;
+    return entry;
 }

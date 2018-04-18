@@ -197,7 +197,7 @@ static int __handle_recv(struct socket *conn_sock, struct comm_ctx *ctx) {
 	msg_spid = msg->hdr.server_pid;
 	msg_pgd = msg->hdr.pgd;
 	ack_code = msg_handler(ctx, msg_vaddr, msg_cpid,
-		msg_spid, msg_pgd, msg_page, handler_cb_data);
+		msg_spid, msg_pgd, msg_page, handler_cb_data, conn_sock);
 
 	if ( ack_code.code == ACKCODE_NO_RESPONSE.code )
 		goto out;
@@ -573,8 +573,13 @@ int comm_resume_read(struct comm_ctx *ctx, struct socket *conn_sock,
 	msg->hdr.vaddr = vaddr;
 	msg->hdr.client_pid = client_pid;
 	msg->hdr.pgd = pgd;
-	msg->hdr.payload_len = PAGE_SIZE;
-	memcpy(msg->data.payload, pagedata, PAGE_SIZE);
+    if (pagedata) {
+	    msg->hdr.payload_len = PAGE_SIZE;
+	    memcpy(msg->data.payload, pagedata, PAGE_SIZE);
+    }else {
+        msg->hdr.payload_len = 0;
+        memset(msg->data.payload, 0, PAGE_SIZE);
+    }
 
 	while ( n_tries_remaining --> 0 ) {
 

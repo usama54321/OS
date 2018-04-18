@@ -8,35 +8,28 @@
 
 typedef void (*callBackFunc)(void*, void*, void* );
 
-struct pid_hashtable_entry {
+struct client_entry {
     struct list_head list;
-    unsigned long token;
+    struct socket *socket;
+    pgd_t* pgd;
     pid_t pid;
 };
 
-struct client_hashtable_entry {
+struct mapped_page {
     struct list_head list;
-    unsigned long ip;
-    unsigned long pgd;
-};
-
-struct vaddr_hashtable_entry {
-    struct list_head list;
-    unsigned long pfn_addr;
-    pid_t pid;
-    struct client_hashtable_entry* clients;
+    unsigned long pfn;
+    void *page_addr;
+    pid_t token;
+    struct client_entry* clients; //list of mapped clients
     bool locked;
 };
 
-int hashtables_init(void);
-void add_pid_hashtable_entry(struct pid_hashtable_entry* entry);
-void add_vaddr_hashtable_entry(struct vaddr_hashtable_entry* entry);
-void add_client_hashtable_entry(struct client_hashtable_entry* entry, struct client_hashtable_entry* existing);
-void lock_vaddr_hashtable(void);
-void unlock_vaddr_hashtable(void);
+int hashtable_init(void);
 
-void foreach_pid_hashtable(callBackFunc, void*, void* );
-void foreach_vaddr_hashtable(callBackFunc, void*, void*);
-struct vaddr_hashtable_entry* make_vaddr_hashtable_entry(unsigned long pfn, pid_t pid, bool locked, unsigned long client_ip, unsigned long client_pgd);
+void add_mapped_page(struct mapped_page* entry);
+void add_client_entry(struct client_entry* entry, struct client_entry* existing);
 
+void foreach_mapped_page(callBackFunc, void*, void*);
+struct mapped_page* make_mapped_page(unsigned long pfn, pid_t pid, bool locked, void *page_addr);
+struct client_entry* make_client_entry(struct socket *sock, pgd_t *pgd, pid_t client_pid);
 #endif

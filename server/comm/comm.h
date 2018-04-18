@@ -36,6 +36,16 @@ typedef struct {unsigned char code;} comm_ackcode_t;
 #define OPCODE_RESUME_READ	((comm_opcode_t){.code = 0x04})
 #define OPCODE_INITIAL_READ	((comm_opcode_t){.code = 0x05})
 #define OPCODE_PING_ALIVE	((comm_opcode_t){.code = 0x06})
+
+/* Request codes */
+#define OPCODE_REQUEST_WRITE_CODE (0x00)
+#define OPCODE_ALLOW_WRITE_CODE	(0x01)
+#define OPCODE_COMMIT_PAGE_CODE	(0x02)
+#define OPCODE_LOCK_READ_CODE	(0x03)
+#define OPCODE_RESUME_READ_CODE	(0x04)
+#define OPCODE_INITIAL_READ_CODE (0x05)
+#define OPCODE_PING_ALIVE_CODE	(0x06)
+
 /* Responses */
 #define ACKCODE_REQUEST_WRITE	((comm_ackcode_t){.code = 0x07})
 #define ACKCODE_ALLOW_WRITE	((comm_ackcode_t){.code = 0x08})
@@ -60,7 +70,7 @@ typedef union {
 
 /* Returns the appropriate response code */
 typedef comm_ackcode_t (*comm_handler_t)(struct comm_ctx *ctx, unsigned long vaddr,
-	pid_t client_pid, pid_t server_pid, pgd_t *pgd, char *pagedata, void *cb_data);
+	pid_t client_pid, pid_t server_pid, pgd_t *pgd, char *pagedata, void *cb_data, struct socket *sock);
 
 /*
  * TODO:
